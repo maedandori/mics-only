@@ -1,3 +1,5 @@
+#[cfg(windows)]
+mod credentials;
 use chrono::{DateTime, Utc};
 use rsfbclient::prelude::*;
 use serde::Deserialize;
@@ -73,6 +75,7 @@ impl Lease {
             .unwrap_or(false)
     }
 }
+#[cfg(not(windows))]
 fn secret(name: &str) -> Result<String, String> {
     let val = env::var(name).map_err(|_| format!("Missing environment credential {name}"))?;
     if val.is_empty() || val.contains(['\n', '\r']) {return Err(format!("Invalid {name}"))}
@@ -170,9 +173,19 @@ fn upload(c: &Config, sync_token: &str, lease: &Lease, snapshot: Value) -> Resul
 fn run(c: Config) -> Result<(), String> {
     if !c.enabled {println!("MICS standby disabled in mics.ini");return Ok(())}
     // Read secrets once; never print secrets or raw employee/snapshot data.
-    let db_password = secret("MICS_DB_PASSWORD")?;
-    let sync_token = secret("MICS_SYNC_TOKEN")?;
-    let coordinator_token = secret("MICS_COORDINATOR_TOKEN")?;
+    // On Windows, use a per-user DPAPI vault distinct from mics-print.
+    // Never send secrets via command-line arguments or store them in mics.ini.
+    #[cfg(windows)]
+    let (db_password, sync_token, coordinator_token) = {
+        let v = credentials::load()?;
+        (v.db_password, v.mics_sync_token, v.coordinator_token)
+    };
+    #[cfg(not(windows))]
+    let (db_password, sync_token, coordinator_token) = (
+        secret("MICS_DB_PASSWORD")?,
+        secret("MICS_SYNC_TOKEN")?,
+        secret("MICS_COORDINATOR_TOKEN")?,
+    );
     let mut previous_hash = String::new();
     loop {
         match acquire(&c, &coordinator_token) {
