@@ -1,0 +1,5 @@
+/target/
+mics.ini
+*.log
+.env
+credentials*
