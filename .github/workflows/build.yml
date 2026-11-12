@@ -22,6 +22,7 @@ jobs:
           name: MICS-Only-Portable-Windows
           path: |
             target/release/mics-only.exe
+            target/release/mics-only-settings.exe
             mics.ini.example
             README.md
           if-no-files-found: error
