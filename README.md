@@ -1,20 +1,28 @@
-# mics-only — MICS Firebird standby reader
+# MICS Only — Firebird backup (Windows)
 
-Rust standby agent extracted from the read-only MICS sync functionality of `maedandori/mics-print`. **No printing**.
+This repository builds **mics-only.exe** (standby reader) and **mics-only-settings.exe** (native Windows configuration GUI), packaged as **MICS-Only-Setup.exe** by GitHub Actions.
 
-## Safe operation
-This application **never reads Firebird or uploads to D1 without a valid lease** from the Cloudflare coordinator. The coordinator endpoint must be implemented/deployed separately; do not enable a second reader on an unprotected legacy sync endpoint.
+## Installation
 
-1. Copy `mics.ini.example` to `mics.ini` beside `mics-only.exe`.
-2. Configure Firebird host/database/user and HTTPS coordinator URL.
-3. Set environment variables `MICS_DB_PASSWORD`, `MICS_SYNC_TOKEN`, and `MICS_COORDINATOR_TOKEN` on the Windows account running the app. Do **not** commit credentials.
-4. Run `mics-only.exe --check-config` then `mics-only.exe`.
-5. Install as a background process via Task Scheduler, using a dedicated least-privilege account.
+1. Download the `MICS-Only-Windows-Installer` artifact from GitHub Actions after a successful Windows build.
+2. Run `MICS-Only-Setup.exe`. Setup launches `mics-only-settings.exe` at completion.
+3. Enter backup Agent ID, Firebird host, port, server database path, read-only username and Cloudflare coordinator URL. Enter Firebird password, **backup MICS Sync Token** and **backup Coordinator Token**. These tokens must be different from the existing `mics-print` token and **must be provisioned on the Worker first**.
+4. Press Save. Settings are written to `mics.ini`. Secrets are encrypted with Windows DPAPI in `%LOCALAPPDATA%\\MICS-Only\\credentials.dpapi`, never in INI or GitHub. Blank password/token fields keep prior encrypted values. Configure and run under the *same Windows user*.
+5. Leave **Enable standby agent OFF** until the coordinator and primary failover control are deployed and verified. The installer does not automatically run the standby reader or connect Firebird.
 
-## Required coordinator contract
-POST `<coordinator_url>/lease` with Bearer coordinator token and JSON `{"agent_id":"...","role":"backup","ttl_seconds":45}` returns `{"granted":true,"epoch":123,"lease_token":"opaque","expires_at":"RFC3339"}` only if PRIMARY is not healthy.  A denial returns `{"granted":false}`.
-POST `<coordinator_url>/sync` with Bearer sync token and headers `X-Mics-Agent-Id`, `X-Mics-Lease-Token`, `X-Mics-Lease-Epoch` accepts the normal mics-print snapshot **only for the current, unexpired lease**. It must atomically validate lease and serialize the D1 write, rejecting stale epochs. A valid lease only controls D1 ingestion, not existing Firebird sockets.
+## Fail-closed behavior
 
-The PRIMARY mics-print agent must also use this lease protocol and report MICS-specific health, independently of printing status, before automatic failover can be enabled. Until then this repo provides a safe standby foundation, **not a deployed end-to-end failover**.
+The standby requests a signed/opaque lease from the Cloudflare coordinator. Without a valid, unexpired lease, it will **not query Firebird** and **not upload to D1**. The Worker must reject stale epochs and leases. The current `mics-print` agent does not yet participate in this lease protocol; automatic failover is not operational until that integration is complete.
 
-Build: `cargo test && cargo build --release`.
+The coordinator contract is:
+- POST `{coordinator_url}/lease`: Bearer backup Coordinator Token, request `{agent_id, role: "backup", ttl_seconds:45}`, response `{granted, epoch, lease_token, expires_at}`.
+- POST `{coordinator_url}/sync`: Bearer backup MICS Sync Token and `X-Mics-Agent-Id`, `X-Mics-Lease-Token`, `X-Mics-Lease-Epoch` headers. Accept only active, unexpired lease; response must include `{"ok":true}`.
+
+## Developer commands
+
+```powershell
+cargo test
+cargo build --release
+```
+
+Do not store secrets in public repositories or copy credentials from the existing `mics-print` installation. The Windows EXEs are not signed; Windows SmartScreen may warn until signed/reputation established.
