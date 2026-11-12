@@ -96,16 +96,17 @@ fn read(c: &Config, password: &str) -> Result<Value, String> {
     b.host(&c.host).port(c.port).db_name(&c.database).user(&c.user).pass(password);
     b.with_transaction(|tr| tr.read_only().no_wait());
     let mut db = b.connect().map_err(|e| e.to_string())?;
-    let has_column = |db: &mut _, relation: &str, column: &str| -> Result<bool, String> {
-        let q = format!("SELECT COUNT(*) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='{relation}' AND TRIM(RDB$FIELD_NAME)='{column}'");
-        let rows: Vec<(i64,)> = db.query(&q, ()).map_err(|e| e.to_string())?;
-        Ok(rows.first().is_some_and(|r| r.0 > 0))
-    };
     // Match the mics-print mapping and preserve compatibility with older MICS schemas.
-    let mend = if has_column(&mut db, "SCHEDULE", "MEND")? {
+    let mend_rows: Vec<(i64,)> = db.query(
+        "SELECT COUNT(*) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='SCHEDULE' AND TRIM(RDB$FIELD_NAME)='MEND'", ()
+    ).map_err(|e| e.to_string())?;
+    let mend = if mend_rows.first().is_some_and(|r| r.0 > 0) {
         "COALESCE(TRIM(CAST(S.MEND AS VARCHAR(40))), '')"
     } else { "CAST('' AS VARCHAR(40))" };
-    let pick = if has_column(&mut db, "MACHINEWORK", "REALPICKQTY")? {
+    let pick_rows: Vec<(i64,)> = db.query(
+        "SELECT COUNT(*) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='MACHINEWORK' AND TRIM(RDB$FIELD_NAME)='REALPICKQTY'", ()
+    ).map_err(|e| e.to_string())?;
+    let pick = if pick_rows.first().is_some_and(|r| r.0 > 0) {
         "COALESCE(TRIM(CAST(W.REALPICKQTY AS VARCHAR(24))), '')"
     } else { "CAST('' AS VARCHAR(24))" };
     let sql = format!(
