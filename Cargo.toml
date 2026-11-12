@@ -12,8 +12,15 @@ sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 url = "2"
 
+[target.'cfg(windows)'.dependencies]
+native-windows-gui = "1.0"
+
 [profile.release]
 opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
+
+[[bin]]
+name = "mics-only-settings"
+path = "src/bin/mics-only-settings.rs"
