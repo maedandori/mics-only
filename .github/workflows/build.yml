@@ -1,20 +1,46 @@
-name: Build MICS Only
+name: Build and package MICS Only
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
 jobs:
-  test:
+  build:
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Test
+      - name: Test Rust
         run: cargo test
-      - name: Build
+      - name: Compile Windows EXE
         run: cargo build --release
-      - uses: actions/upload-artifact@v4
+      - name: Upload standalone EXE
+        uses: actions/upload-artifact@v4
         with:
-          name: mics-only-windows
-          path: target/release/mics-only.exe
+          name: MICS-Only-Portable-Windows
+          path: |
+            target/release/mics-only.exe
+            mics.ini.example
+            README.md
+          if-no-files-found: error
+      - name: Install Inno Setup
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Package installer
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\mics-only.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload Windows installer
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MICS-Only-Windows-Installer
+          path: dist/MICS-Only-Setup.exe
+          if-no-files-found: error
