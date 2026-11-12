@@ -181,7 +181,7 @@ fn main() {
             *state2.borrow_mut()=false;
             match result {
                 Ok(())=> {nwg::simple_message("MICS Only", "Saved. Restart mics-only.exe to apply changes.");nwg::stop_thread_dispatch();},
-                Err(e)=>nwg::error_message("MICS Only Settings", &e),
+                Err(e)=>{nwg::error_message("MICS Only Settings", &e);},
             }
         }
     });
