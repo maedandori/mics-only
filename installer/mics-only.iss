@@ -20,13 +20,15 @@ UninstallDisplayIcon={app}\mics-only.exe
 
 [Files]
 Source: "..\target\release\mics-only.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\target\release\mics-only-settings.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\mics.ini.example"; DestDir: "{app}"; DestName: "mics.ini"; Flags: onlyifdoesntexist
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\MICS Only - Readme"; Filename: "{app}\README.md"
+Name: "{group}\MICS Only Settings"; Filename: "{app}\mics-only-settings.exe"
 Name: "{group}\MICS Only - Config"; Filename: "{app}\mics.ini"
 Name: "{group}\MICS Only - Check Config"; Filename: "{app}\mics-only.exe"; Parameters: "--check-config"; WorkingDir: "{app}"
 
 [Run]
-Filename: "{app}\README.md"; Description: "Read installation instructions"; Flags: postinstall shellexec skipifsilent
+Filename: "{app}\mics-only-settings.exe"; Description: "Configure MICS Only / 設定を開く"; Flags: postinstall nowait skipifsilent
