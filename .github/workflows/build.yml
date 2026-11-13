@@ -1,4 +1,4 @@
-name: Build and package MICS Only
+name: Build and release MICS Only portable
 on:
   push:
     branches: [main]
@@ -14,33 +14,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Test Rust
         run: cargo test
-      - name: Compile Windows EXE
+      - name: Compile Windows EXEs
         run: cargo build --release
-      - name: Upload standalone EXE
-        uses: actions/upload-artifact@v4
-        with:
-          name: MICS-Only-Portable-Windows
-          path: |
-            target/release/mics-only.exe
-            target/release/mics-only-settings.exe
-            mics.ini.example
-            README.md
-            www/**
-          if-no-files-found: error
-      - name: Install Inno Setup
-        if: github.event_name != 'pull_request'
-        shell: pwsh
-        run: |
-          choco install innosetup --yes --no-progress
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Package installer
-        if: github.event_name != 'pull_request'
-        shell: pwsh
-        run: |
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\mics-only.iss
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Create portable ZIP with WWW assets
-        if: github.event_name != 'pull_request'
+      - name: Package portable ZIP
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release-package | Out-Null
@@ -49,24 +25,22 @@ jobs:
           Copy-Item mics.ini.example release-package/
           Copy-Item README.md release-package/
           Copy-Item www -Destination release-package/www -Recurse
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path release-package/* -DestinationPath dist/MICS-Only-Portable-Windows.zip -Force
-      - name: Publish GitHub Release v0.2.0
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MICS-Only-Portable-Windows
+          path: dist/MICS-Only-Portable-Windows.zip
+          if-no-files-found: error
+      - name: Publish GitHub Release
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.2.0
-          name: MICS Only v0.2.0
+          tag_name: v0.2.1
+          name: MICS Only v0.2.1
           target_commitish: ${{ github.sha }}
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
-          files: |
-            dist/MICS-Only-Setup.exe
-            dist/MICS-Only-Portable-Windows.zip
-      - name: Upload Windows installer
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: MICS-Only-Windows-Installer
-          path: dist/MICS-Only-Setup.exe
-          if-no-files-found: error
+          files: dist/MICS-Only-Portable-Windows.zip
