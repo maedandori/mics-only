@@ -17,8 +17,9 @@ struct MachineDefects {
     order_no: String,
     shift_total: i64,
 }
-pub fn current_shift_key() -> String {
-    let jst=Utc::now().with_timezone(&FixedOffset::east_opt(9*3600).expect("JST"));
+pub fn current_shift_key() -> String {shift_key_at(Utc::now())}
+fn shift_key_at(now:chrono::DateTime<Utc>) -> String {
+    let jst=now.with_timezone(&FixedOffset::east_opt(9*3600).expect("JST"));
     let hour=jst.hour();
     let work_date=if hour<7 || (hour==7&&jst.minute()<30) {jst.date_naive()-ChronoDuration::days(1)}else{jst.date_naive()};
     let night=hour>=19 || hour<7 || (hour==7&&jst.minute()<30);
@@ -85,6 +86,16 @@ impl ShiftDefects {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn jst_shift_boundaries(){
+        use chrono::TimeZone;
+        let t=|h,m|Utc.with_ymd_and_hms(2026,11,14,h,m,0).single().unwrap();
+        // 2026-11-14 07:29 JST is 2026-11-13 22:29 UTC.
+        assert_eq!(shift_key_at(Utc.with_ymd_and_hms(2026,11,13,22,29,0).single().unwrap()),"2026-11-13-night");
+        assert_eq!(shift_key_at(Utc.with_ymd_and_hms(2026,11,13,22,30,0).single().unwrap()),"2026-11-14-day");
+        assert_eq!(shift_key_at(t(9,59)),"2026-11-14-day");
+        assert_eq!(shift_key_at(t(10,0)),"2026-11-14-night");
+        assert_eq!(shift_key_at(t(22,29)),"2026-11-14-night");
+    }
     #[test] fn tracks_deltas_and_order_reset(){
         let path=std::env::temp_dir().join(format!("mics-shift-test-{}.json",std::process::id()));
         let _=fs::remove_file(&path);
