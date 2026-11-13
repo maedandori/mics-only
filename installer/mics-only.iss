@@ -1,5 +1,5 @@
 #define MyAppName "MICS Only"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.2.0"
 [Setup]
 AppId={{B8C9B4A1-A07A-4287-B2CC-431381211D25}
 AppName={#MyAppName}
