@@ -184,3 +184,53 @@
 .all-row-fields{display:grid;grid-template-columns:minmax(120px,1fr) minmax(0,3fr);gap:7px 14px;margin:0}
 .all-row-fields dt{font-size:12px;font-weight:700;color:#536c85}
 .all-row-fields dd{margin:0;overflow-wrap:anywhere;font-size:12px;color:#203a57}
+
+/* Final page footer: navigation + machine card sizing + browser fullscreen.
+   No sticky/fixed controls, nothing overlaying the last production cards. */
+.layout{display:block;min-height:100vh;padding:0}
+.layout > main{display:block;width:100%;max-width:1650px;margin:0 auto;padding:16px 20px 22px}
+.page-footer{position:static;display:grid;gap:10px;margin-top:25px;padding:15px 17px 12px;border:1px solid #d6e3ef;border-radius:14px;background:#fff;color:#1e3a59;box-shadow:0 3px 12px #1432520a}
+.page-footer .footer-navigation{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.page-footer .footer-brand{font-size:15px;font-weight:900;color:#1d4166;white-space:nowrap}
+.page-footer .footer-brand span{font-size:9px;color:#518078}
+.page-footer .menu-toggle{font-size:15px;flex:0 0 32px;width:32px;height:32px;background:#264a70;color:white;border:0;border-radius:8px}
+.page-footer .footer-nav{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.page-footer .footer-nav .nav{font-size:12px;font-weight:700;text-align:center;padding:8px 11px;background:#edf4fc;color:#30547a;border:1px solid #d4e2f0;border-radius:8px}
+.page-footer .footer-nav .nav.active,.page-footer .footer-nav .nav:hover{background:#226149;color:#fff;border-color:#226149}
+.layout.menu-collapsed .page-footer .footer-nav{display:none}
+.layout.menu-collapsed .page-footer .footer-brand{display:block;font-size:15px}
+.layout.menu-collapsed .page-footer .menu-toggle{font-size:15px}
+.page-footer .footer-settings{display:flex;align-items:center;gap:12px;min-width:0}
+.page-footer .size-dock,.layout > main .page-footer .size-dock{
+ position:static;display:flex;flex:1 1 auto;align-items:center;justify-content:center;gap:11px;
+ width:auto;min-width:0;padding:8px 10px;background:#f6f9fd;
+ border:1px solid #e0e9f4;box-shadow:none;border-radius:9px;z-index:auto
+}
+.page-footer .size-dock input{width:min(420px,40vw);min-width:65px;accent-color:#2879db}
+.page-footer .size-dock label{white-space:nowrap}
+.page-footer .fullscreen-toggle{flex-shrink:0;border:1px solid #bed3e9;border-radius:9px;background:#1f466e;color:#fff;font-size:12px;font-weight:800;padding:11px 16px;cursor:pointer}
+.page-footer .fullscreen-toggle:hover,.page-footer .fullscreen-toggle:focus-visible{background:#30709b}
+.page-footer .footer-note{font-size:10px;color:#7a8ba1;text-align:right}
+.ng-alerts[hidden]{display:none!important}
+/* Readable semi-transparent warnings sit at the top, away from the footer.
+   pointer-events:none prevents staff from losing access to the dashboard. */
+.ng-alerts{position:fixed;z-index:30;top:76px;right:22px;display:grid;gap:7px;width:min(365px,calc(100vw - 24px));max-height:45vh;overflow:auto;pointer-events:none}
+.ng-warning-line{display:grid;gap:2px;border:1px solid #e8a45f;background:rgba(255,245,220,.83);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);border-radius:10px;padding:9px 12px;box-shadow:0 4px 16px #54361815;animation:ng-notice-in .35s ease-out}
+.ng-warning-line strong{font-size:12px;color:#883b16}.ng-warning-line span{font-size:11px;color:#69472a;line-height:1.5}
+@keyframes ng-notice-in{from{opacity:0;transform:translateY(-7px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:800px){
+ .layout > main{padding:12px 10px 20px}
+ .page-footer .footer-nav .nav{font-size:12px;text-align:center;padding:8px 9px}
+ .page-footer .footer-nav .nav::first-letter{font-size:inherit}
+ .page-footer .size-dock input{width:min(320px,28vw)}
+}
+@media(max-width:480px){
+ .page-footer{padding:11px 9px;margin-top:15px}
+ .page-footer .footer-settings{flex-wrap:wrap}
+ .page-footer .size-dock{flex-basis:100%}
+ .page-footer .size-dock input{width:35vw}
+ .page-footer .fullscreen-toggle{width:100%;padding:9px}
+ .page-footer .footer-note{text-align:center}
+ .ng-alerts{top:64px;right:9px;width:min(310px,calc(100vw - 18px))}
+}
+@media(prefers-reduced-motion:reduce){.ng-warning-line{animation:none}}
