@@ -1,10 +1,9 @@
 //! Read-only Firebird schedule cache shared by local dashboard.
 use rsfbclient::prelude::*;
 use serde_json::{json,Value};
-use std::{collections::BTreeSet,fs,path::{Path,PathBuf}};
+use std::{collections::BTreeSet,fs,path::PathBuf};
 use chrono::{Datelike,FixedOffset,Utc};
 use sha2::{Digest,Sha256};
-use std::time::Duration;
 const MACHINES:[i32;14]=[5,6,7,8,10,11,12,13,14,15,16,17,18,19];
 fn window()->(String,String,String){
  let jst=FixedOffset::east_opt(9*3600).expect("JST");
@@ -71,7 +70,7 @@ pub fn local_path()->PathBuf {
     super::local_web::default_snapshot_path().with_file_name("schedule-local.json")
 }
 pub fn collect(c:&super::Config,password:&str)->Result<Value,String>{
-    let (from,to,local_end)=window();
+    let (from,_to,local_end)=window();
     let rows=read(&c.host,c.port,&c.database,&c.user,password,&from,&local_end)?;
     if rows.is_empty(){return Err("Schedule returned no rows; keeping previous local cache".into())}
     let cache=json!({"from":from,"to":local_end,"rows":rows});
