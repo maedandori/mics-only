@@ -335,6 +335,23 @@ fn test_connection(c:&Config)->Result<(),String>{
     let result:Value=response.into_json().map_err(|e|format!("COORDINATOR_BAD_RESPONSE {e}"))?;
     if result["service"]!="mics-failover"||result["ok"]!=true{return Err("Coordinator health response is invalid".into())}
     println!("COORDINATOR_HTTP_OK; enabled={}",result["enabled"]);
+    // Identify this exact installation in Cloudflare D1 via the authenticated
+    // Coordinator /presence endpoint. No Firebird SQL or lease is requested.
+    if c.agent_id.len()<3 || c.agent_id.len()>100
+        || !c.agent_id.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b)) {
+        return Err("Invalid Agent ID: set a unique ID on each PC".into())
+    }
+    #[cfg(windows)]
+    let coordinator_token=credentials::load()
+        .map_err(|e|format!("D1 registration requires saved DPAPI Coordinator Token: {e}"))?
+        .coordinator_token;
+    #[cfg(not(windows))]
+    let coordinator_token=secret("MICS_COORDINATOR_TOKEN")?;
+    if coordinator_token.is_empty(){return Err("Coordinator Token is missing; D1 registration not attempted".into())}
+    presence(c,&coordinator_token).map_err(|e|format!("D1_PRESENCE_FAILED: {e}"))?;
+    println!("D1_PRESENCE_OK agent_id={} display_name={}",
+        c.agent_id,if c.display_name.is_empty(){&c.agent_id}else{&c.display_name});
+    println!("NOTE: Each PC MUST have its own unique agent_id in mics.ini.");
     Ok(())
 }
 fn main() {
