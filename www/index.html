@@ -1,33 +1,10 @@
-<!doctype html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#071020">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" href="/icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/style.css">
-<title>MICS Local Dashboard</title>
-</head>
-<body>
-<main>
-  <header class="topbar">
-    <div class="brand">
-      <div class="eyebrow">MICS ONLY · LOCAL</div>
-      <h1>機械稼働状況</h1>
-    </div>
-    <section class="summary" aria-label="Machine overview">
-      <div class="stat"><span>機械</span><strong id="total">14</strong></div>
-      <div class="stat"><span>稼働中</span><strong id="running">0</strong></div>
-      <div class="stat"><span>停止 / 異常</span><strong id="stopped">0</strong></div>
-      <div class="stat"><span>通信</span><strong id="connection">確認中</strong></div>
-      <div class="stat server"><strong id="server-mode">STANDBY</strong><span id="updated">保存データなし</span></div>
-    </section>
-  </header>
-  <section class="machines" id="machines" aria-label="Machines"></section>
-  <footer>Local-only · 127.0.0.1 · Internet不要</footer>
-</main>
-<script src="/app.js" defer></script>
-</body>
-</html>
+<!doctype html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#071020"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css"><title>MICS Local</title></head>
+<body><div class="layout">
+<aside class="sidebar"><div class="logo">MICS <span>LOCAL</span></div>
+<nav aria-label="Main menu"><button class="nav active" data-view="dashboard">◉　ダッシュボード</button><button class="nav" data-view="schedule">▦　予定</button><button class="nav" data-view="all">☷　全て</button></nav>
+<div class="side-foot">127.0.0.1:8787<br>ローカル専用</div></aside>
+<main><header class="topbar"><div><div class="eyebrow">MICS ONLY · LOCAL</div><h1 id="page-title">ダッシュボード</h1></div><section class="summary" aria-label="Machine overview"><div class="stat"><span>機械</span><b id="total">14</b></div><div class="stat"><span>稼働中</span><b id="running">0</b></div><div class="stat"><span>停止 / 異常</span><b id="stopped">0</b></div><div class="stat"><span>通信</span><b id="connection">確認中</b></div><div class="stat server"><b id="server-mode">STANDBY</b><span id="updated">保存データなし</span></div></section></header>
+<section id="dashboard-view" class="view"><div class="machines" id="machines"></div></section>
+<section id="schedule-view" class="view" hidden><div class="toolbar"><div class="week-controls"><button id="current-week" class="pill selected">今週</button><button id="next-week" class="pill">来週</button></div><div class="filters"><button class="pill selected" data-filter="all">全て</button><button class="pill" data-filter="color">色替え</button><button class="pill" data-filter="mold">型替え</button></div></div><p id="schedule-meta" class="muted"></p><div id="schedule-machines" class="schedule-grid"></div></section>
+<section id="all-view" class="view" hidden><p class="muted">このPCに保存された機械スナップショットのみを表示します。</p><div id="all-machines" class="all-grid"></div></section>
+</main></div><script src="/app.js" defer></script></body></html>
