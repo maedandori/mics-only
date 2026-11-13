@@ -40,6 +40,10 @@ pub fn install_if_available(exe:&Path)->Result<String,String>{
   return Ok(format!("Already up to date (v{}).",env!("CARGO_PKG_VERSION")))
  };
  let folder=exe.parent().ok_or("Cannot find installation directory")?;
+ let blocked=folder.join("data").join("update-blocked-version.txt");
+ if fs::read_to_string(blocked).ok().is_some_and(|v|v.trim()==tag){
+  return Err(format!("Release {tag} previously failed; waiting for a newer release"))
+ }
  let dir=folder.join("data").join("update-staging");
  fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
  let zip=dir.join("MICS-Only-Portable-Windows.zip");
