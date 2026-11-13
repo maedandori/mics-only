@@ -97,7 +97,8 @@ fn presence(c:&Config,coordinator_token:&str)->Result<Value,String>{
  if url.scheme()!="https"||url.host_str().is_none(){return Err("Invalid coordinator URL".into())}
  let result=client().post(&format!("{}/presence",c.coordinator_url.trim_end_matches('/')))
   .set("Authorization",&format!("Bearer {coordinator_token}"))
-  .send_json(json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled,"version":env!("CARGO_PKG_VERSION")}))
+  .send_json(json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled,"version":env!("CARGO_PKG_VERSION"),
+   "update_failed_version":env::current_exe().ok().and_then(|p|p.parent().map(|dir|dir.join("data").join("update-blocked-version.txt"))).and_then(|p|fs::read_to_string(p).ok()).map(|v|v.trim().trim_start_matches('v').to_owned())}))
   .map_err(|e|match e {
       ureq::Error::Status(status, response) => {
           let detail=response.into_string().unwrap_or_default();
