@@ -1,14 +1,14 @@
 # MICS Only — Firebird backup (Windows)
 
-This repository builds **mics-only.exe** (standby reader) and **mics-only-settings.exe** (native Windows configuration GUI), packaged as **MICS-Only-Setup.exe** by GitHub Actions.
+This repository builds **mics-only.exe** (standby reader) and **mics-only-settings.exe** (native Windows configuration GUI), packaged as a single **MICS-Only-Portable-Windows.zip** by GitHub Actions, with no installer.
 
 ## Installation
 
-1. Download the `MICS-Only-Windows-Installer` artifact from GitHub Actions after a successful Windows build.
-2. Run `MICS-Only-Setup.exe`. Setup launches `mics-only-settings.exe` at completion.
+1. Download `MICS-Only-Portable-Windows.zip` from GitHub Releases after a successful Windows build.
+2. Extract the ZIP to a writable folder, then open `mics-only-settings.exe`.
 3. Enter backup Agent ID, Firebird host, port, server database path, read-only username and Cloudflare coordinator URL. Enter Firebird password, **backup MICS Sync Token** and **backup Coordinator Token**. These tokens must be different from the existing `mics-print` token and **must be provisioned on the Worker first**.
 4. Press Save. Settings are written to `mics.ini`. Secrets are encrypted with Windows DPAPI in `%LOCALAPPDATA%\\MICS-Only\\credentials.dpapi`, never in INI or GitHub. Blank password/token fields keep prior encrypted values. Configure and run under the *same Windows user*.
-5. Leave **Enable standby agent OFF** until the coordinator and primary failover control are deployed and verified. The installer does not automatically run the standby reader or connect Firebird.
+5. Leave **Enable standby agent OFF** until the coordinator and primary failover control are deployed and verified. The portable bundle does not automatically run the standby reader or connect Firebird.
 
 ## Fail-closed behavior
 
@@ -30,7 +30,7 @@ Do not store secrets in public repositories or copy credentials from the existin
 ## Local-only dashboard / PWA (Windows)
 - The agent itself hosts **http://127.0.0.1:8787/**, whether standby is enabled or disabled.
 - The local web server binds **only 127.0.0.1** (not 0.0.0.0). Other PCs, LAN clients, phones and Internet clients **cannot connect**. This is intentional.
-- Dashboard HTML/CSS/JS, PWA manifest and service worker are compiled into `mics-only.exe`; no additional web executable or external server required.
+- Dashboard HTML/CSS/JS, PWA manifest and service worker are editable files in `www/` next to the two executables. The Agent serves them from local disk; no external server required.
 - The web UI shows 14 machine nodes in MICS order, the last saved data, status code, progress, counts and cycle.
 - Local snapshot file: `%LOCALAPPDATA%\MICS-Only\data\machines.json`. It updates only when a valid, leased Firebird snapshot differs from the previous sampled snapshot. The file is not a mirror of every MICS table.
 - With **Enable standby agent OFF**, web still opens, displays last saved data or placeholders, and does not touch Firebird or Cloudflare.
@@ -47,12 +47,15 @@ CLI equivalent: `mics-only.exe --test-connection`.
 
 **Open Local Web** opens the browser at `http://127.0.0.1:8787/`. Save still restarts the agent. Only two EXEs remain.
 
-## Agent management and GitHub Release updates (v0.2.0)
-Settings now has **Start Agent**, **Stop Agent**, **Restart Agent**, and **GitHub Update** buttons.
-- Start launches only `mics-only.exe`. Stop terminates only the `mics-only.exe` process on this Windows computer. The printing agent is not touched.
-- Restart stops `mics-only.exe` and starts it with the saved settings. When stopped, the localhost web dashboard is also unavailable.
-- Stop does not disable **Start agent with Windows**; uncheck that setting and save to prevent startup on the next Windows sign-in.
-- **GitHub Update** queries `https://api.github.com/repos/maedandori/mics-only/releases/latest`, downloads `MICS-Only-Setup.exe` from the matching release if the local version differs, checks the published size, then opens the installer for user approval. There is no background auto-update.
-- GitHub Actions compiles and publishes versioned release `v0.2.0` only after the Windows build and installer steps succeed. Artifacts include the two executables and editable `www/`.
-- The installer preserves existing `mics.ini`, Windows DPAPI credentials and locally modified `www/` files. Remove or rename a modified asset if you intentionally want the newest default version installed.
-- No release or Windows build result has been verified solely by committing source code.
+## Agent management, portable updates, and JSON sync (v0.2.1)
+Settings has **Start Agent**, **Stop Agent**, **Restart Agent**, and **GitHub Update** buttons.
+- Only `mics-only.exe` is started/stopped; the print agent is unaffected.
+- The release includes only `MICS-Only-Portable-Windows.zip`, containing two EXEs, `www/`, README and example INI. No installer is generated.
+- **GitHub Update** downloads the latest GitHub Releases ZIP; it verifies size and the GitHub-published SHA256 digest when present, then runs a separate PowerShell updater to replace the two EXEs after Settings closes. Existing `mics.ini`, DPAPI secrets, and modified `www/` files are preserved.
+- A backup `.bak` of each existing EXE is retained during an update. If the update fails, inspect `%TEMP%\MICS-Only-Update\update-error.log`; automatic rollback is not yet implemented.
+- If a modified web file should be replaced with the new default, rename it before updating.
+- A successful Rust build and published GitHub Release must be confirmed before using the update button.
+- `%LOCALAPPDATA%\MICS-Only\data\machines.json`: last valid Firebird snapshot, updated only when machine values change and a Coordinator lease permits reading.
+- `%LOCALAPPDATA%\MICS-Only\data\sync-status.json`: last sync acknowledgement/status, with no credentials.
+- With a valid Coordinator lease, uploads use the existing `/sync` endpoint and retry after failures during a later authorized read. When denied lease, no Firebird reads or uploads occur.
+- Only one agent may own the lease; production failover remains disabled until `mics-print` participates in the same Coordinator.
