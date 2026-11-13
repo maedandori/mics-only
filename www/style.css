@@ -76,3 +76,57 @@
 @media(max-width:800px){.layout .sidebar{width:56px;flex-basis:56px;padding:10px 4px}.layout:not(.menu-collapsed) .sidebar{width:184px;flex-basis:184px}.layout.menu-collapsed .sidebar{width:52px;flex-basis:52px}.machines{grid-template-columns:repeat(auto-fit,minmax(min(100%,var(--node-width)),1fr))}.node .main-metrics{grid-template-columns:minmax(0,1fr) 84px}.node .progress{width:80px;height:80px}.node .progress svg{width:80px;height:80px}.node .progress b{font-size:17px}.node .progress small{top:55px}.node .cycle strong{font-size:14px}}
 @media(max-width:430px){.machines{grid-template-columns:repeat(auto-fit,minmax(min(100%,var(--node-width)),1fr))}.size-dock{gap:6px;padding:9px 7px max(9px,env(safe-area-inset-bottom))}.size-dock label{font-size:11px}.size-dock input{width:37vw}.size-dock span{display:none}.node .quantities dt{font-size:9px}.node .quantities dd{font-size:12px}}
 @media(prefers-reduced-motion:reduce){.ng-fire .ng-value,.ng-fire .ng-value::before,.ng-fire .ng-value::after{animation:none}.sidebar{transition:none}}
+
+/* Full-card machine state coloring: gentle surface tints keep numbers readable. */
+.node{background:#f2f5f9;border-color:#cfd9e5;color:#193454;transition:background-color .2s,border-color .2s}
+.node.running{background:#dff7e9;border-color:#80cda2;border-top-color:#169b60}
+.node.warning{background:#fff0d5;border-color:#ebbf68;border-top-color:#e69d22}
+.node.danger{background:#ffe0e2;border-color:#e89a9e;border-top-color:#dc3548}
+.node .quantities>div{background:#ffffffb8;border-color:#ffffffbf}
+.node.running .progress .arc{stroke:#15905e}
+.node.warning .progress .arc{stroke:#c78a16}
+.node.danger .progress .arc{stroke:#cf4352}
+.node .status{font-weight:900}
+.node .mold,.node .mold-code,.node .cycle,.node .product,.node .staff{color:#213b58}
+
+/* Navigation and resize controls live in document flow at the very end.
+   Nothing stays sticky or fixed while the operator scrolls. */
+.layout{display:block;padding-bottom:0;min-height:100vh}
+.layout main{width:100%;max-width:1650px;margin:0 auto;display:block}
+.page-bottom-controls{display:flex;flex-direction:column;align-items:stretch;gap:12px;margin-top:24px;padding-bottom:max(18px,env(safe-area-inset-bottom))}
+.layout .page-bottom-controls .sidebar{
+ position:static;top:auto;right:auto;left:auto;order:initial;
+ width:208px;flex:none;height:auto;min-height:0;align-self:flex-end;
+ display:block;padding:12px;border-radius:12px;overflow:hidden;
+ background:linear-gradient(150deg,#152e4d,#0c1e36);
+ transition:width .2s ease;
+}
+.page-bottom-controls .sidebar .logo{padding:3px 0 10px}
+.page-bottom-controls .sidebar nav{display:grid;gap:6px}
+.page-bottom-controls .sidebar .side-foot{display:block;padding:10px 3px 2px}
+.layout.menu-collapsed .page-bottom-controls .sidebar{
+ width:50px;flex:none;padding:7px;min-height:0
+}
+.layout.menu-collapsed .page-bottom-controls .sidebar .logo{padding:0;display:flex;justify-content:center}
+.layout.menu-collapsed .page-bottom-controls .sidebar nav,
+.layout.menu-collapsed .page-bottom-controls .sidebar .side-foot{display:none}
+.layout.menu-collapsed .page-bottom-controls .sidebar .menu-toggle{font-size:18px}
+.page-bottom-controls .size-dock{
+ position:static;left:auto;right:auto;bottom:auto;z-index:auto;
+ width:100%;display:flex;align-items:center;justify-content:center;
+ border:1px solid #d7e2ef;border-radius:12px;
+ padding:13px 18px;background:#fff;box-shadow:0 2px 9px #1432520b;
+}
+@media(max-width:800px){
+ .layout .page-bottom-controls .sidebar{width:208px;flex:none;padding:12px}
+ .layout.menu-collapsed .page-bottom-controls .sidebar{width:50px;flex:none;padding:7px}
+ .page-bottom-controls .sidebar .logo{font-size:20px;text-align:left}
+ .page-bottom-controls .sidebar .logo span{display:inline;font-size:11px}
+ .page-bottom-controls .sidebar .nav{font-size:14px;text-align:left;padding:10px}
+ .page-bottom-controls .sidebar .nav::first-letter{font-size:inherit}
+ .layout.menu-collapsed .page-bottom-controls .sidebar .logo{font-size:0}
+}
+@media(max-width:430px){
+ .page-bottom-controls{margin-top:16px}
+ .page-bottom-controls .size-dock{padding:11px 8px}
+}
