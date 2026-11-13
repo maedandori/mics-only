@@ -25,6 +25,7 @@ jobs:
             target/release/mics-only-settings.exe
             mics.ini.example
             README.md
+            www/**
           if-no-files-found: error
       - name: Install Inno Setup
         if: github.event_name != 'pull_request'
