@@ -178,6 +178,7 @@ fn run(c: Config) -> Result<(), String> {
     local_web::start(local.clone())?;
     if !c.enabled {
         local.set_mode("DISABLED");
+        local.record_sync("DISABLED");
         println!("MICS standby disabled; local dashboard remains available");
         loop {thread::sleep(Duration::from_secs(3600))}
     }
@@ -203,6 +204,7 @@ fn run(c: Config) -> Result<(), String> {
                 match read(&c, &db_password) {
                     Ok(mut data) => {
                         if data["machines"].as_array().is_none_or(|a| a.is_empty()) {
+                            local.record_sync("READ_EMPTY");
                             eprintln!("MICS_READ_EMPTY: refused to overwrite current data");
                         } else {
                             let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&data).unwrap_or_default()));
@@ -213,16 +215,16 @@ fn run(c: Config) -> Result<(), String> {
                                         data["sampled_at"] = json!(Utc::now().to_rfc3339());
                                         if let Err(e)=local.update(data.clone()){eprintln!("LOCAL_SNAPSHOT_FAILED {e}")}
                                         match upload(&c, &sync_token, &new_lease, data) {
-                                            Ok(()) => { previous_hash = hash; println!("MICS_SYNC_OK epoch={}", new_lease.epoch); },
-                                            Err(e) => eprintln!("{e}"),
+                                            Ok(()) => { previous_hash = hash; local.record_sync("SYNCED"); println!("MICS_SYNC_OK epoch={}", new_lease.epoch); },
+                                            Err(e) => {local.record_sync("RETRY_PENDING");eprintln!("{e}");},
                                         }
                                     }
                                 }
-                                _ => eprintln!("LEASE_LOST: discard snapshot"),
+                                _ => {local.record_sync("LEASE_LOST");eprintln!("LEASE_LOST: discard snapshot");},
                             }
                         }
                     }
-                    Err(e) => eprintln!("MICS_READ_FAILED {e}"),
+                    Err(e) => {local.record_sync("READ_FAILED");eprintln!("MICS_READ_FAILED {e}");},
                 }
             }
             Ok(None) => { local.set_mode("STANDBY"); previous_hash.clear(); println!("STANDBY: coordinator denied lease"); }
