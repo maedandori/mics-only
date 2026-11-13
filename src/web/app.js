@@ -4,7 +4,7 @@ const el=id=>document.getElementById(id);
 const escapeHtml=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function kind(code){code=String(code??"");if(["410","440","490"].includes(code))return "danger";if(["100","210"].includes(code))return "warning";if(["200"].includes(code))return "running";return "";}
 const label={100:"段取り中",200:"稼働中",210:"サイクル注意",410:"金型異常",440:"色替え",490:"異常"};
-function render(data){
+function render(data,status){
   const machines=Array.isArray(data.machines)?data.machines:[];
   const map=new Map(machines.map(m=>[Number(m.machine_no),m]));
   el("running").textContent=machines.filter(m=>kind(m.status_code)==="running").length;
@@ -23,7 +23,7 @@ function render(data){
   }).join("");
   const stamp=data.sampled_at?new Date(data.sampled_at):null;
   el("updated").textContent=stamp&&!isNaN(stamp)?"更新: "+stamp.toLocaleString("ja-JP"):"保存データなし";
-  const stale=stamp&&Date.now()-stamp.getTime()>120000;
+  const stale=stamp&&Date.now()-stamp.getTime()>120000&&status.mode!=="ACTIVE";
   el("banner").textContent=!machines.length?"保存されたデータはありません。Agent が ACTIVE になると更新されます。":stale?"注意: 最終データは2分以上前です。表示は保存された情報です。":"";
 }
 async function refresh(){
@@ -31,7 +31,7 @@ async function refresh(){
     const [snapshot,status]=await Promise.all([
       fetch("/api/machines",{cache:"no-store"}).then(r=>{if(!r.ok)throw Error(r.status);return r.json()}),
       fetch("/api/status",{cache:"no-store"}).then(r=>r.json())]);
-    render(snapshot);
+    render(snapshot,status);
     el("server-mode").textContent=status.mode||"UNKNOWN";
     el("connection").textContent="LOCAL OK";
   }catch(error){
