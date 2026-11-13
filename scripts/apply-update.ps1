@@ -51,6 +51,17 @@ try {
   }
   $replacementStarted=$true
   foreach($name in $names){Copy-Item -LiteralPath (Join-Path $stage $name) -Destination (Join-Path $Target $name) -Force}
+  # Install the versioned Vue files alongside legacy WWW. Existing configurations
+  # and custom legacy files are never overwritten.
+  $vueName='vue-'+$Version
+  $vueSrc=Join-Path (Join-Path $stage 'www') $vueName
+  $vueDest=Join-Path (Join-Path $Target 'www') $vueName
+  if(!(Test-Path -LiteralPath (Join-Path $vueSrc 'index.html'))){throw 'Vue index.html missing from release'}
+  if(Test-Path -LiteralPath $vueDest){Remove-Item -LiteralPath $vueDest -Recurse -Force}
+  New-Item -ItemType Directory -Path (Split-Path $vueDest) -Force | Out-Null
+  Copy-Item -LiteralPath $vueSrc -Destination $vueDest -Recurse -Force
+  $vueIndex=Get-Content -LiteralPath (Join-Path $vueDest 'index.html') -Raw
+  if($vueIndex -notmatch 'assets/'){throw 'Vue asset paths missing'}
   $process=Start-Process -FilePath (Join-Path $Target 'mics-only.exe') -WorkingDirectory $Target -PassThru
   $healthy=$false
   for($i=0;$i -lt 25;$i++){
@@ -72,6 +83,7 @@ try {
     Set-Content -LiteralPath (Join-Path $Target 'data\update-blocked-version.txt') -Value $Version
   }
   if($replacementStarted){
+    if($vueDest -and (Test-Path -LiteralPath $vueDest)){Remove-Item -LiteralPath $vueDest -Recurse -Force -ErrorAction SilentlyContinue}
     Get-Process -Name 'mics-only' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 500
     try{
