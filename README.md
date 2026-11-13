@@ -42,7 +42,7 @@ Do not store secrets in public repositories or copy credentials from the existin
 Open `mics-only-settings.exe` and click **Test Connection** (tests only the **saved** INI):
 1. Connects to Firebird **TCP port** for network reachability without login or SQL.
 2. GETs the Coordinator `/health` endpoint if configured, without asking for a lease.
-3. Never uploads or reads rows from Firebird. This is **not** an authentication or database-read validation test.
+3. After Coordinator health succeeds, sends one authenticated POST to Coordinator `/presence` to register the saved `agent_id` and `display_name` in Cloudflare D1. The test requires a saved Coordinator Token and reports `D1_PRESENCE_OK` only after HTTP 200.\n4. Does not run Firebird SQL, request a failover lease, or upload production snapshots. **Assign a unique Agent ID to each PC**; copied IDs overwrite one database record.
 CLI equivalent: `mics-only.exe --test-connection`.
 
 **Open Local Web** opens the browser at `http://127.0.0.1:8787/`. Save still restarts the agent. Only two EXEs remain.
