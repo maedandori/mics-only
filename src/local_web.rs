@@ -91,7 +91,16 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     reply(&mut stream,status,kind,if method=="HEAD"{&[]}else{&body},cache);
 }
 pub fn start(state:LocalState)->Result<(),String>{
-    let listener=TcpListener::bind("127.0.0.1:8787").map_err(|e|format!("LOCAL_WEB_BIND_FAILED: {e}"))?;
+    // Settings restarts the agent immediately; the old process may still be
+    // releasing the local port for a brief moment.
+    let mut listener=None;
+    for _ in 0..20 {
+        match TcpListener::bind("127.0.0.1:8787"){
+            Ok(l)=>{listener=Some(l);break},
+            Err(_)=>thread::sleep(Duration::from_millis(150))
+        }
+    }
+    let listener=listener.ok_or("LOCAL_WEB_BIND_FAILED: port 8787 busy after restart")?;
     thread::spawn(move ||{
         println!("LOCAL_WEB_READY http://127.0.0.1:8787");
         for client in listener.incoming(){
@@ -108,4 +117,14 @@ pub fn default_snapshot_path()->PathBuf{
         .or_else(||std::env::current_exe().ok().and_then(|p|p.parent().map(Path::to_path_buf)))
         .unwrap_or_else(||PathBuf::from("."));
     base.join("MICS-Only").join("data").join("machines.json")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test] fn local_state_starts_with_empty_snapshot(){
+        let path=std::env::temp_dir().join("mics-only-test-nonexistent-snapshot.json");
+        let state=LocalState::new(path);
+        assert!(state.snapshot.lock().unwrap()["machines"].as_array().is_some());
+    }
 }
