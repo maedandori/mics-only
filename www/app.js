@@ -18,7 +18,7 @@ function drawDashboard(){
   const staff=m.staff_name||m.operator_name||"",cycle=m.cycle_seconds??"—",pick=m.pick_qty??"—";
   const statusLabel=has?(names[m.status_code]||m.status_name||m.status_code||"不明"):"データなし";
   return '<article class="node '+status(m.status_code,m.status_name)+'">'+
-   '<div class="node-top"><span class="machine-number">#'+n+'</span><span class="staff">'+(staff?'担当者: '+esc(staff):'')+'</span></div>'+
+   '<div class="node-top"><span class="machine-number">'+n+'号機</span><span class="staff">'+(staff?'担当者: '+esc(staff):'')+'</span></div>'+
    '<div class="mold">'+esc(m.mold_name||m.mold_no||"—")+'</div>'+
    '<div class="mold-code">金型番号: '+esc(m.mold_no||"—")+'</div>'+
    '<div class="product">'+esc(m.product_name||"—")+'</div>'+
@@ -76,7 +76,7 @@ function drawAll(){
      </tr>`;
    }).join(""):"";
    return `<article class="all-card machine-schedule"><header>
-     <b class="machine-number">#${n}</b>
+     <b class="machine-number">${n}号機</b>
      <span class="count">${entries.length} 件</span>
      <span class="status">${m?esc(names[m.status_code]||m.status_code||"不明"):"データなし"}</span>
    </header>
@@ -108,7 +108,7 @@ function drawSchedule(){
  const a=parseDate(r.start_at),b=r.end_at?parseDate(r.end_at):a;
  return a<end&&b>=start&&(filter==="all"||r.change===filter)
  });
- return `<article class="schedule-card"><header><strong>#${n}</strong><span class="muted">${entries.length} 件</span></header>${entries.length?entries.map(r=>`<div class="schedule-entry"><div class="entry-time">${esc(r.start_at)} → ${esc(r.end_at||"—")}</div><div class="entry-name">${esc(r.mold_name||r.mold_no||"—")}</div><div class="product">${esc(r.product_name||"")}　${esc(r.color||"")}</div>${["color","mold"].includes(r.change)?`<span class="tag ${r.change}">${r.change==="color"?"色替え":"型替え"}</span>`:""}</div>`).join(""):'<div class="empty">この週の保存予定なし</div>'}</article>`;
+ return `<article class="schedule-card"><header><strong>${n}号機</strong><span class="muted">${entries.length} 件</span></header>${entries.length?entries.map(r=>`<div class="schedule-entry"><div class="entry-time">${esc(r.start_at)} → ${esc(r.end_at||"—")}</div><div class="entry-name">${esc(r.mold_name||r.mold_no||"—")}</div><div class="product">${esc(r.product_name||"")}　${esc(r.color||"")}</div>${["color","mold"].includes(r.change)?`<span class="tag ${r.change}">${r.change==="color"?"色替え":"型替え"}</span>`:""}</div>`).join(""):'<div class="empty">この週の保存予定なし</div>'}</article>`;
  }).join("");
 }
 function show(viewName){view=viewName;for(const v of ["dashboard","schedule","all"])$(v+"-view").hidden=v!==viewName;document.querySelectorAll(".nav").forEach(b=>b.classList.toggle("active",b.dataset.view===viewName));$("page-title").textContent={dashboard:"ダッシュボード",schedule:"予定",all:"全て"}[viewName];if(viewName==="schedule")drawSchedule();if(viewName==="all")drawAll()}
