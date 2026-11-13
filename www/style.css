@@ -328,3 +328,32 @@
  .page-footer .summary{grid-template-columns:repeat(2,minmax(0,1fr))}
  .page-footer .summary .stat.server{grid-column:span 2}
 }
+
+/* Machine heading: machine no. | current state | large bold operator.
+   Bottom machine status is deliberately kept unchanged. */
+.node .node-top{
+ display:grid!important;
+ grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+ align-items:center;column-gap:6px;min-height:28px;
+}
+.node .node-top .machine-number{justify-self:start;white-space:nowrap}
+.node .node-top .machine-status-top{
+ justify-self:center;text-align:center;
+ font-size:11px;font-weight:800;line-height:1.2;
+ color:#566d84;white-space:nowrap;
+}
+.node.running .machine-status-top{color:#087d53}
+.node.setup .machine-status-top{color:#a65d16}
+.node.warning .machine-status-top{color:#9c6509}
+.node.danger .machine-status-top{color:#bf3042}
+.node .node-top .staff{
+ display:block;justify-self:end;min-width:0;max-width:100%;
+ font-size:13px!important;font-weight:850;line-height:1.2;
+ text-align:right;color:#193450;
+ white-space:normal;overflow-wrap:anywhere;
+}
+@media(max-width:800px){
+ .node .node-top{column-gap:4px}
+ .node .node-top .machine-status-top{font-size:10px}
+ .node .node-top .staff{font-size:12px!important}
+}
