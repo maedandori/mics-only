@@ -130,3 +130,11 @@ GitHub Actions builds Vue using Node.js and includes the prebuilt `www/vue-v0.2.
 The v0.2.6 update helper copies the new version's Vue bundle before starting the agent, checks local API health and version, and restores the prior EXEs if startup fails. Existing `mics.ini`, encrypted DPAPI tokens, `data/`, and legacy custom `www` files are untouched. Vue files are only updated through new Release versions.
 
 Frontend development: `cd local-vue && npm install && npm run build`. The generated output is `www/vue-v0.2.6/`. The Windows Release workflow performs this automatically.
+
+## v0.2.7 — per-shift NG (不良数)
+
+The Rust local snapshot adds `qty_ng_shift`, `qty_ng_shift_key`, and `qty_ng_shift_status` to each machine. `qty_ng` remains the original cumulative Firebird value and uploads to Cloudflare are unchanged. The Vue Dashboard displays **不良数（今シフト）** as the primary number and **累計** below it. Flame animation starts above 5 defects within the shift; the warning banner starts above 20 shift defects.
+
+Day shift: 07:30–19:00 JST. Night shift: 19:00–07:30 JST next morning. `data/shift-ng.json` persists the last observed Firebird counter per machine/order and its accumulated shift-only increments. At each shift boundary, the display resets, even with unchanged Firebird totals. A counter decrease or order change does not create negative deltas or invent unseen defects. The first observation of a shift is the baseline (zero); exact historical defects before the first observation require time-stamped defect events, which the current cumulative counter does not provide. During a Firebird outage/standby period, missed increments cannot be attributed precisely to their shifts.
+
+`www/vue-v0.2.7/` is the versioned frontend build. Older frontends do not show the new metric until they update. The 0.2.7 Release workflow builds Vue and Windows executables and packages both with the existing rollback flow.
