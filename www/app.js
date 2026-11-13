@@ -2,7 +2,7 @@
 const order=[15,8,19,14,5,17,13,6,10,11,18,7,12,16],names={100:"段取り中",200:"稼働中",210:"サイクル注意",410:"金型異常",440:"色替え",490:"異常"};
 const $=id=>document.getElementById(id), esc=x=>String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 let current={machines:[]},schedule={rows:[]},week=0,filter="all",view="dashboard";
-function status(code){const s=String(code??"");return["410","440","490"].includes(s)?"danger":["100","210"].includes(s)?"warning":s==="200"?"running":""}
+function status(code,name=""){const s=String(code??"").trim(),t=String(name??"");if(["410","440","490","300","0"].includes(s)||/停止|異常|クレーム/.test(t))return "danger";if(s==="100"||/段取り/.test(t))return "setup";if(s==="210"||/注意/.test(t))return "warning";if(s==="200"||/稼働中/.test(t))return "running";return ""}
 function num(n){return(Number(n)||0).toLocaleString("ja-JP")}
 function drawDashboard(){
  const map=new Map((current.machines||[]).map(m=>[Number(m.machine_no),m]));
@@ -17,7 +17,7 @@ function drawDashboard(){
   const pct=planned?Math.max(0,Math.min(100,100*good/planned)):0;
   const staff=m.staff_name||m.operator_name||"",cycle=m.cycle_seconds??"—",pick=m.pick_qty??"—";
   const statusLabel=has?(names[m.status_code]||m.status_name||m.status_code||"不明"):"データなし";
-  return '<article class="node '+status(m.status_code)+'">'+
+  return '<article class="node '+status(m.status_code,m.status_name)+'">'+
    '<div class="node-top"><span class="machine-number">#'+n+'</span><span class="staff">'+(staff?'担当者: '+esc(staff):'')+'</span></div>'+
    '<div class="mold">'+esc(m.mold_name||m.mold_no||"—")+'</div>'+
    '<div class="mold-code">金型番号: '+esc(m.mold_no||"—")+'</div>'+
