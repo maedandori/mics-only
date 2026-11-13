@@ -219,7 +219,7 @@ fn main() {
             }
             if handle==update_agent.handle {
                 match github_update(&agent_exe) {
-                    Ok(result)=>{nwg::simple_message("GitHub Update",&result);if result.starts_with("Installer "){nwg::stop_thread_dispatch();}},
+                    Ok(result)=>{nwg::simple_message("GitHub Update",&result);if result.starts_with("Portable ZIP "){nwg::stop_thread_dispatch();}},
                     Err(e)=>{nwg::error_message("GitHub Update",&e);}
                 }
                 return
@@ -327,42 +327,103 @@ fn main() {
 fn github_update(agent_exe:&std::path::Path)->Result<String,String>{
     use std::{fs,io::{Read,Write},process::Command};
     use std::os::windows::process::CommandExt;
-    // Only official Releases from the fixed repository; never accept arbitrary URLs.
+    use sha2::{Digest,Sha256};
     let api="https://api.github.com/repos/maedandori/mics-only/releases/latest";
-    let response=ureq::AgentBuilder::new()
-        .timeout(std::time::Duration::from_secs(20)).build()
-        .get(api).set("User-Agent","mics-only-settings-updater")
-        .call().map_err(|e|format!("Release check failed: {e}. Check GitHub Releases."))?;
+    let response=ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(20))
+        .build().get(api).set("User-Agent","mics-only-settings-portable")
+        .call().map_err(|e|format!("GitHub Release check failed: {e}"))?;
     let info:serde_json::Value=response.into_json().map_err(|e|e.to_string())?;
     let tag=info["tag_name"].as_str().ok_or("Release tag missing")?;
     if !tag.starts_with('v')||tag.len()>32||!tag[1..].bytes().all(|c|c.is_ascii_digit()||c==b'.'){
-        return Err("Invalid release version".into())
+        return Err("Invalid release tag".into())
     }
     let current=format!("v{}",env!("CARGO_PKG_VERSION"));
     if tag==current{return Ok(format!("Already up to date ({current})."))}
     let assets=info["assets"].as_array().ok_or("Release assets missing")?;
-    let asset=assets.iter().find(|a|a["name"]=="MICS-Only-Setup.exe")
-        .ok_or("Release does not contain MICS-Only-Setup.exe")?;
-    let url=asset["browser_download_url"].as_str().ok_or("Download URL missing")?;
-    if !url.starts_with("https://github.com/maedandori/mics-only/releases/download/")||
-        !url.ends_with("/MICS-Only-Setup.exe"){return Err("Untrusted release URL".into())}
+    let asset=assets.iter().find(|a|a["name"]=="MICS-Only-Portable-Windows.zip")
+        .ok_or("Portable ZIP asset missing from GitHub Release")?;
+    let url=asset["browser_download_url"].as_str().ok_or("Asset URL missing")?;
+    if !url.starts_with("https://github.com/maedandori/mics-only/releases/download/")
+        || !url.ends_with("/MICS-Only-Portable-Windows.zip") {
+        return Err("Untrusted GitHub Release URL".into())
+    }
     let size=asset["size"].as_u64().unwrap_or(0);
-    if size==0||size>120_000_000{return Err("Unexpected installer size".into())}
-    let release=ureq::AgentBuilder::new()
-        .timeout(std::time::Duration::from_secs(180)).build()
-        .get(url).set("User-Agent","mics-only-settings-updater")
-        .call().map_err(|e|format!("Installer download failed: {e}"))?;
+    if size==0||size>120_000_000{return Err("Unexpected ZIP size".into())}
+    let response=ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(180))
+        .build().get(url).set("User-Agent","mics-only-settings-portable")
+        .call().map_err(|e|format!("ZIP download failed: {e}"))?;
     let dir=std::env::temp_dir().join("MICS-Only-Update");
     fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
-    let target=dir.join("MICS-Only-Setup.exe");
-    let mut file=fs::File::create(&target).map_err(|e|e.to_string())?;
-    let count=std::io::copy(&mut release.into_reader().take(120_000_001),&mut file).map_err(|e|e.to_string())?;
+    let zip=dir.join("MICS-Only-Portable-Windows.zip");
+    let mut file=fs::File::create(&zip).map_err(|e|e.to_string())?;
+    let mut reader=response.into_reader().take(120_000_001);
+    let mut hasher=Sha256::new();
+    let mut count=0u64;
+    let mut buffer=[0u8;65536];
+    loop{
+        let n=reader.read(&mut buffer).map_err(|e|e.to_string())?;
+        if n==0{break}
+        file.write_all(&buffer[..n]).map_err(|e|e.to_string())?;
+        hasher.update(&buffer[..n]);
+        count+=n as u64;
+    }
     file.flush().map_err(|e|e.to_string())?;
-    if count!=size{let _=fs::remove_file(&target);return Err("Downloaded installer size mismatch".into())}
-    // The official installer is launched by the user. Never force-stop the
-    // active synchronization agent before the installer can complete.
-    Command::new(&target).arg("/CLOSEAPPLICATIONS")
+    if count!=size{return Err("Downloaded ZIP size mismatch".into())}
+    // GitHub Release asset digest is provided by GitHub and checked when available.
+    if let Some(expected)=asset["digest"].as_str().and_then(|v|v.strip_prefix("sha256:")){
+        let actual=format!("{:x}",hasher.finalize());
+        if !actual.eq_ignore_ascii_case(expected){return Err("GitHub ZIP SHA256 mismatch".into())}
+    }
+    let installation=agent_exe.parent().ok_or("Agent directory unavailable")?;
+    // A separate PowerShell process waits for Settings to exit before replacing EXEs.
+    // It preserves mics.ini, Windows DPAPI credentials, and any existing www files.
+    let script=dir.join("apply-portable-update.ps1");
+    let script_content=r#"
+param(
+    [Parameter(Mandatory=$true)][string]$Archive,
+    [Parameter(Mandatory=$true)][string]$Target,
+    [Parameter(Mandatory=$true)][int]$ParentId
+)
+$ErrorActionPreference='Stop'
+try {
+    try { Wait-Process -Id $ParentId -Timeout 60 -ErrorAction Stop } catch {}
+    $stage=Join-Path $env:TEMP 'MICS-Only-Update\extracted'
+    if(Test-Path $stage){Remove-Item -LiteralPath $stage -Recurse -Force}
+    New-Item -ItemType Directory -Path $stage -Force | Out-Null
+    Expand-Archive -LiteralPath $Archive -DestinationPath $stage -Force
+    $names=@('mics-only.exe','mics-only-settings.exe')
+    foreach($name in $names){
+        if(!(Test-Path -LiteralPath (Join-Path $stage $name))){throw "ZIP missing $name"}
+    }
+    Get-Process -Name 'mics-only' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction Stop
+    Start-Sleep -Milliseconds 700
+    foreach($name in $names){
+        $dest=Join-Path $Target $name
+        if(Test-Path $dest){Copy-Item -LiteralPath $dest -Destination ($dest+'.bak') -Force}
+        Copy-Item -LiteralPath (Join-Path $stage $name) -Destination $dest -Force
+    }
+    $web=Join-Path $stage 'www'
+    if(Test-Path $web){
+        $destWeb=Join-Path $Target 'www'
+        New-Item -ItemType Directory -Path $destWeb -Force | Out-Null
+        Get-ChildItem -LiteralPath $web -File -Recurse | ForEach-Object {
+            $relative=$_.FullName.Substring($web.Length).TrimStart('\')
+            $dst=Join-Path $destWeb $relative
+            $parent=Split-Path -Parent $dst
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+            if(!(Test-Path -LiteralPath $dst)){Copy-Item -LiteralPath $_.FullName -Destination $dst}
+        }
+    }
+    Start-Process -FilePath (Join-Path $Target 'mics-only.exe') -WorkingDirectory $Target
+} catch {
+    $msg="MICS Only update failed: $($_.Exception.Message)"
+    Add-Content -LiteralPath (Join-Path $env:TEMP 'MICS-Only-Update\update-error.log') -Value $msg
+}
+"#;
+    fs::write(&script,script_content).map_err(|e|e.to_string())?;
+    Command::new("powershell.exe").args(["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File"])
+        .arg(&script).arg("-Archive").arg(&zip).arg("-Target").arg(installation)
+        .arg("-ParentId").arg(std::process::id().to_string())
         .creation_flags(0x08000000).spawn().map_err(|e|e.to_string())?;
-    let _=agent_exe;
-    Ok(format!("Installer {tag} launched. Follow the setup window to finish updating."))
+    Ok(format!("Portable ZIP {tag} verified. Settings will close and install the update."))
 }
