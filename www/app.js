@@ -73,7 +73,7 @@ function drawDashboard(){
   const statusLabel=has?(names[m.status_code]||m.status_name||m.status_code||"不明"):"データなし";
   const prediction=has?changePrediction(m,Array.isArray(schedule.rows)?schedule.rows:[],current.sampled_at):{type:"",text:"—",available:false};
   return '<article class="node '+status(m.status_code,m.status_name)+'">'+
-   '<div class="node-top"><span class="machine-number">'+n+'号機</span><span class="staff">'+(staff?'担当者: '+esc(staff):'')+'</span></div>'+
+   '<div class="node-top"><span class="machine-number">'+n+'号機</span><span class="machine-status-top">'+esc(statusLabel)+'</span><span class="staff">'+(staff?'担当者: '+esc(staff):'')+'</span></div>'+
    '<div class="mold">'+esc(m.mold_name||m.mold_no||"—")+'</div>'+
    '<div class="mold-code">金型番号: '+esc(m.mold_no||"—")+'</div>'+
    '<div class="product">'+esc(m.product_name||"—")+'</div>'+
