@@ -95,7 +95,7 @@ fn presence(c:&Config,coordinator_token:&str)->Result<(),String>{
  if url.scheme()!="https"||url.host_str().is_none(){return Ok(())}
  let result=client().post(&format!("{}/presence",c.coordinator_url.trim_end_matches('/')))
   .set("Authorization",&format!("Bearer {coordinator_token}"))
-  .send_json(json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"standby_enabled":c.enabled}))
+  .send_json(json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled}))
   .map_err(|e|format!("PRESENCE_FAILED {e}"))?;
  if result.status()!=200{return Err(format!("PRESENCE_HTTP_{}",result.status()))}
  Ok(())
