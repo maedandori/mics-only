@@ -107,6 +107,13 @@ fn main() {
         "Credentials: not configured"
     }).parent(&window).position((25,651)).size((735,25)).build(&mut status).unwrap();
 
+    let mut test=nwg::Button::default();
+    nwg::Button::builder().text("Test Connection / 接続テスト").parent(&window)
+        .position((25,695)).size((190,36)).build(&mut test).unwrap();
+    let mut open_web=nwg::Button::default();
+    nwg::Button::builder().text("Open Local Web").parent(&window)
+        .position((230,695)).size((190,36)).build(&mut open_web).unwrap();
+
     let mut save=nwg::Button::default();
     nwg::Button::builder().text("Save / 保存").parent(&window)
         .position((470,695)).size((140,36)).build(&mut save).unwrap();
@@ -116,6 +123,8 @@ fn main() {
 
     let enable=Rc::new(enable);
     let autostart=Rc::new(autostart);
+    let test=Rc::new(test);
+    let open_web=Rc::new(open_web);
     let save=Rc::new(save);
     let close=Rc::new(close);
     let fields=Rc::new(inputs);
@@ -128,6 +137,8 @@ fn main() {
         let secret_fields=secret_fields.clone();
         let enable=enable.clone();
         let autostart=autostart.clone();
+        let test=test.clone();
+        let open_web=open_web.clone();
         let save=save.clone();
         let close=close.clone();
         let ini=ini.clone();
@@ -138,6 +149,28 @@ fn main() {
             }
             if event!=nwg::Event::OnButtonClick {return}
             if handle==close.handle {nwg::stop_thread_dispatch();return}
+            if handle==open_web.handle {
+                let _=Command::new("explorer.exe").arg("http://127.0.0.1:8787")
+                    .creation_flags(0x08000000).spawn();
+                return
+            }
+            if handle==test.handle {
+                // Checks only the saved INI configuration, TCP port and coordinator health.
+                // It never connects to the Firebird database, executes SQL or requests a lease.
+                let output=Command::new(&agent_exe).arg("--test-connection")
+                    .creation_flags(0x08000000).output();
+                match output {
+                    Ok(o)=>{
+                        let stdout=String::from_utf8_lossy(&o.stdout);
+                        let stderr=String::from_utf8_lossy(&o.stderr);
+                        let detail=format!("Saved configuration only. No SQL performed.\n{}\n{}",stdout,stderr);
+                        if o.status.success(){nwg::simple_message("Connection Test", &detail);}
+                        else{nwg::error_message("Connection Test FAILED", &detail);}
+                    }
+                    Err(e)=>{nwg::error_message("Connection Test", &format!("Could not run mics-only.exe: {e}"));}
+                }
+                return
+            }
             if handle!=save.handle{return}
             if *state2.borrow(){return}
             *state2.borrow_mut()=true;
@@ -229,7 +262,7 @@ fn main() {
         }
     });
     // Keep window-owned controls alive for the duration of the event loop.
-    let _controls=(heading,labels,secret_labels,note,status,save,close,enable,autostart,state);
+    let _controls=(heading,labels,secret_labels,note,status,test,open_web,save,close,enable,autostart,state);
     nwg::dispatch_thread_events();
 }
 #[cfg(not(windows))]
