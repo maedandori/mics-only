@@ -173,3 +173,14 @@
  .layout > .sidebar .logo{font-size:15px}
  .layout > .sidebar .nav{font-size:12px;padding:9px 4px}
 }
+
+/* Click-to-expand full schedule records, with keyboard accessibility. */
+.schedule-table .all-schedule-row{cursor:pointer}
+.schedule-table .all-schedule-row:hover{background:#e6f2fc!important}
+.schedule-table .all-schedule-row.expanded{background:#dcecfb!important}
+.schedule-table .all-schedule-row:focus-visible{outline:2px solid #2563eb;outline-offset:-2px}
+.schedule-table .all-schedule-detail[hidden]{display:none!important}
+.schedule-table .all-schedule-detail td{background:#f2f7fc;padding:14px;border-bottom:2px solid #c9dcee}
+.all-row-fields{display:grid;grid-template-columns:minmax(120px,1fr) minmax(0,3fr);gap:7px 14px;margin:0}
+.all-row-fields dt{font-size:12px;font-weight:700;color:#536c85}
+.all-row-fields dd{margin:0;overflow-wrap:anywhere;font-size:12px;color:#203a57}
