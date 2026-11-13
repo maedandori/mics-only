@@ -2,6 +2,7 @@
 #[cfg(windows)]
 mod credentials;
 mod local_web;
+mod schedule;
 use chrono::{DateTime, Utc};
 use rsfbclient::prelude::*;
 use serde::Deserialize;
@@ -197,10 +198,23 @@ fn run(c: Config) -> Result<(), String> {
         secret("MICS_COORDINATOR_TOKEN")?,
     );
     let mut previous_hash = String::new();
+    let mut schedule_polled_at:Option<std::time::Instant>=None;
     loop {
         match acquire(&c, &coordinator_token) {
             Ok(Some(lease)) => {
                 local.set_mode("ACTIVE");
+                if schedule_polled_at.map(|t|t.elapsed()>=Duration::from_secs(60)).unwrap_or(true){
+                    // A valid coordinator lease is required before opening Firebird
+                    // even for the local-only schedule cache.
+                    if let Ok(Some(grant))=acquire(&c,&coordinator_token){
+                        if grant.epoch==lease.epoch{
+                            match schedule::collect(&c,&db_password){
+                                Ok(_)=>{schedule_polled_at=Some(std::time::Instant::now());println!("LOCAL_SCHEDULE_CACHE_OK");},
+                                Err(e)=>{schedule_polled_at=Some(std::time::Instant::now());eprintln!("LOCAL_SCHEDULE_FAILED {e}");}
+                            }
+                        }
+                    }
+                }
                 match read(&c, &db_password) {
                     Ok(mut data) => {
                         if data["machines"].as_array().is_none_or(|a| a.is_empty()) {
