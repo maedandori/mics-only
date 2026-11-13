@@ -91,13 +91,13 @@ fn secret(name: &str) -> Result<String, String> {
 fn client() -> ureq::Agent {
     ureq::AgentBuilder::new().timeout(Duration::from_secs(15)).build()
 }
-fn presence(c:&Config,coordinator_token:&str)->Result<(),String>{
- if coordinator_token.is_empty()||c.coordinator_url.is_empty(){return Ok(())}
+fn presence(c:&Config,coordinator_token:&str)->Result<Value,String>{
+ if coordinator_token.is_empty()||c.coordinator_url.is_empty(){return Err("Presence credentials missing".into())}
  let url=url::Url::parse(&c.coordinator_url).map_err(|e|e.to_string())?;
- if url.scheme()!="https"||url.host_str().is_none(){return Ok(())}
+ if url.scheme()!="https"||url.host_str().is_none(){return Err("Invalid coordinator URL".into())}
  let result=client().post(&format!("{}/presence",c.coordinator_url.trim_end_matches('/')))
   .set("Authorization",&format!("Bearer {coordinator_token}"))
-  .send_json(json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled}))
+  .send_json(json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled,"version":env!("CARGO_PKG_VERSION")}))
   .map_err(|e|match e {
       ureq::Error::Status(status, response) => {
           let detail=response.into_string().unwrap_or_default();
@@ -106,7 +106,7 @@ fn presence(c:&Config,coordinator_token:&str)->Result<(),String>{
       other => format!("PRESENCE_FAILED {other}")
   })?;
  if result.status()!=200{return Err(format!("PRESENCE_HTTP_{}",result.status()))}
- Ok(())
+ result.into_json().map_err(|e|format!("Bad presence reply: {e}"))
 }
 fn acquire(c: &Config, coordinator_token: &str) -> Result<Option<Lease>, String> {
     let response = client().post(&format!("{}/lease", c.coordinator_url.trim_end_matches('/')))
@@ -194,6 +194,27 @@ fn upload(c: &Config, sync_token: &str, lease: &Lease, snapshot: Value) -> Resul
     if body["ok"] != true {return Err("Sync not acknowledged by coordinator".into())}
     Ok(())
 }
+#[cfg(windows)]
+fn remote_update_request(response:&Value,local:&local_web::LocalState){
+    use std::sync::atomic::{AtomicBool,Ordering};
+    static CHECKING: AtomicBool=AtomicBool::new(false);
+    if response["update_requested"]!=true{return}
+    let mode=local.mode.lock().ok().map(|s|s.clone()).unwrap_or_default();
+    if mode!="MIRROR_ONLY"&&mode!="STANDBY"{return}
+    if CHECKING.swap(true,Ordering::SeqCst){return}
+    let state=local.clone();
+    thread::spawn(move ||{
+        if let Ok(exe)=env::current_exe(){
+            let safe=state.mode.lock().ok().is_some_and(|mode|mode.as_str()=="MIRROR_ONLY"||mode.as_str()=="STANDBY");
+            if safe {
+                if let Err(e)=updater::install_if_available(&exe){
+                    eprintln!("ADMIN_UPDATE_FAILED {e}");
+                }
+            }
+        }
+        CHECKING.store(false,Ordering::SeqCst);
+    });
+}
 fn run(c: Config) -> Result<(), String> {
     // Always serve the local dashboard, even when standby is disabled or lease denied.
     let local=local_web::LocalState::new(local_web::default_snapshot_path());
@@ -211,11 +232,7 @@ fn run(c: Config) -> Result<(), String> {
                     if let Ok(exe)=env::current_exe(){
                         match updater::install_if_available(&exe){
                             Ok(result) if result.starts_with("UPDATE_STAGED ")=>{
-                                let still_safe=state.mode.lock().map(|m|m.as_str()!="ACTIVE").unwrap_or(false);
-                                if still_safe {
-                                    println!("{result}");
-                                    std::process::exit(0);
-                                }
+                                println!("{result}");
                             },
                             Ok(_)=>{},
                             Err(e)=>eprintln!("AUTO_UPDATE_CHECK_FAILED {e}")
@@ -246,7 +263,12 @@ fn run(c: Config) -> Result<(), String> {
                 &&u.username()==""&&u.password().is_none());
         let mut last_mirror=std::time::Instant::now()-Duration::from_secs(301);
         loop {
-            if valid_url&&!presence_secret.is_empty(){let _=presence(&c,&presence_secret);}
+            if valid_url&&!presence_secret.is_empty(){
+                if let Ok(response)=presence(&c,&presence_secret){
+                    #[cfg(windows)]
+                    remote_update_request(&response,&local);
+                }
+            }
             if last_mirror.elapsed()>=Duration::from_secs(300) {
                 last_mirror=std::time::Instant::now();
                 if valid_url&&!mirror_secret.is_empty(){
@@ -278,7 +300,10 @@ fn run(c: Config) -> Result<(), String> {
     let mut last_presence:Option<std::time::Instant>=None;
     loop {
         if last_presence.map(|t|t.elapsed()>=Duration::from_secs(60)).unwrap_or(true){
-            let _=presence(&c,&coordinator_token);
+            if let Ok(response)=presence(&c,&coordinator_token){
+                #[cfg(windows)]
+                remote_update_request(&response,&local);
+            }
             last_presence=Some(std::time::Instant::now());
         }
         match acquire(&c, &coordinator_token) {
