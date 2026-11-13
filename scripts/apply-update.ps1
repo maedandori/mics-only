@@ -64,8 +64,10 @@ try {
   # Keep backup until next successful update, for emergency manual recovery.
 }catch{
   Log "UPDATE_FAILED $($_.Exception.Message)"
-  New-Item -ItemType Directory -Path (Join-Path $Target 'data') -Force | Out-Null
-  Set-Content -LiteralPath (Join-Path $Target 'data\update-blocked-version.txt') -Value $Version
+  if($_.Exception.Message -ne 'ACTIVE agent, update postponed'){
+    New-Item -ItemType Directory -Path (Join-Path $Target 'data') -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $Target 'data\update-blocked-version.txt') -Value $Version
+  }
   if($replacementStarted){
     Get-Process -Name 'mics-only' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 500
