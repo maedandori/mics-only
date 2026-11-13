@@ -3,6 +3,8 @@ use rsfbclient::prelude::*;
 use serde_json::{json,Value};
 use std::{collections::BTreeSet,fs,path::{Path,PathBuf}};
 use chrono::{Datelike,FixedOffset,Utc};
+use sha2::{Digest,Sha256};
+use std::time::Duration;
 const MACHINES:[i32;14]=[5,6,7,8,10,11,12,13,14,15,16,17,18,19];
 fn window()->(String,String,String){
  let jst=FixedOffset::east_opt(9*3600).expect("JST");
@@ -72,11 +74,12 @@ pub fn collect(c:&super::Config,password:&str)->Result<Value,String>{
     let (from,to,local_end)=window();
     let rows=read(&c.host,c.port,&c.database,&c.user,password,&from,&local_end)?;
     if rows.is_empty(){return Err("Schedule returned no rows; keeping previous local cache".into())}
-    let cache=json!({"from":from,"to":local_end,"rows":rows,"sampled_at":Utc::now().to_rfc3339()});
+    let cache=json!({"from":from,"to":local_end,"rows":rows});
     let path=local_path();
     if let Some(dir)=path.parent(){fs::create_dir_all(dir).map_err(|e|e.to_string())?}
     // Never replace a usable cache with an empty or invalid response.
     let bytes=serde_json::to_vec_pretty(&cache).map_err(|e|e.to_string())?;
+    if fs::read(&path).ok().as_deref()==Some(bytes.as_slice()){return Ok(cache)}
     let tmp=path.with_extension("json.tmp");
     fs::write(&tmp,&bytes).map_err(|e|e.to_string())?;
     let bak=path.with_extension("json.bak");
@@ -89,4 +92,35 @@ pub fn collect(c:&super::Config,password:&str)->Result<Value,String>{
         return Err(e.to_string())
     }
     Ok(cache)
+}
+
+pub fn upload_if_changed(c:&super::Config,token:&str,grant:&super::Lease,cache:&Value)->Result<bool,String>{
+    let from=cache["from"].as_str().ok_or("Missing schedule from")?;
+    let to=chrono::NaiveDateTime::parse_from_str(from,"%Y-%m-%d %H:%M:%S")
+        .map_err(|e|e.to_string())?+chrono::Duration::days(14);
+    let to=to.format("%Y-%m-%d %H:%M:%S").to_string();
+    let rows=cache["rows"].as_array().ok_or("Missing schedule rows")?
+        .iter().filter(|r|{
+            let start=r["start_at"].as_str().unwrap_or("");
+            let end=r["end_at"].as_str().unwrap_or(start);
+            start<to.as_str()&&end>=from
+        }).cloned().collect::<Vec<Value>>();
+    if rows.is_empty()||rows.len()>3000{return Err("Invalid 14-day backup schedule snapshot".into())}
+    let payload=json!({"source":"mics-print-schedule","window_start":from,"window_end":to,
+        "machines":MACHINES,"rows":rows});
+    let bytes=serde_json::to_vec(&payload).map_err(|e|e.to_string())?;
+    let digest=format!("{:x}",Sha256::digest(&bytes));
+    let ack=local_path().with_file_name("schedule-last-ack.sha256");
+    if fs::read_to_string(&ack).ok().as_deref()==Some(digest.as_str()){return Ok(false)}
+    let endpoint=format!("{}/schedule",c.coordinator_url.trim_end_matches('/'));
+    let response=super::client().post(&endpoint)
+        .set("Authorization",&format!("Bearer {token}"))
+        .set("X-Mics-Agent-Id",&c.agent_id)
+        .set("X-Mics-Lease-Token",&grant.lease_token)
+        .set("X-Mics-Lease-Epoch",&grant.epoch.to_string())
+        .send_json(payload).map_err(|e|format!("SCHEDULE_UPLOAD_FAILED {e}"))?;
+    let result:Value=response.into_json().map_err(|e|e.to_string())?;
+    if result["ok"]!=true{return Err("Schedule sync not acknowledged".into())}
+    fs::write(ack,digest).map_err(|e|e.to_string())?;
+    Ok(true)
 }
