@@ -9,7 +9,7 @@ use rsfbclient::prelude::*;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, env, fs, net::{TcpStream,ToSocketAddrs}, path::PathBuf, thread, time::Duration};
+use std::{collections::BTreeMap, env, fs, net::{TcpStream,ToSocketAddrs}, thread, time::Duration};
 
 #[derive(Debug)]
 struct Config {
