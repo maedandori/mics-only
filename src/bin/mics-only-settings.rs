@@ -219,7 +219,7 @@ fn main() {
             }
             if handle==update_agent.handle {
                 match github_update(&agent_exe) {
-                    Ok(result)=>{nwg::simple_message("GitHub Update",&result);},
+                    Ok(result)=>{nwg::simple_message("GitHub Update",&result);if result.starts_with("Installer "){nwg::stop_thread_dispatch();}},
                     Err(e)=>{nwg::error_message("GitHub Update",&e);}
                 }
                 return
