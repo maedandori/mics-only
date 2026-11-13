@@ -115,6 +115,35 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     if !matches!(host.as_str(),"127.0.0.1:8787"|"localhost:8787"|"[::1]:8787") {
         reply(&mut stream,"403 Forbidden","text/plain",b"Localhost only","no-store");return
     }
+    // Versioned Vue bundle. The v0.2.5 updater preserves existing www files:
+    // a new versioned directory is copied without replacing the legacy UI.
+    let route=path.split('?').next().unwrap_or("");
+    let vue_dir=www_dir().join(concat!("vue-v",env!("CARGO_PKG_VERSION")));
+    let vue_entry=vue_dir.join("index.html");
+    if vue_entry.is_file() {
+        let requested=if route=="/"||route=="/index.html" {
+            Some(vue_entry.clone())
+        } else if route.starts_with(concat!("/vue-v",env!("CARGO_PKG_VERSION"),"/")) {
+            let relative=route.trim_start_matches('/').strip_prefix(concat!("vue-v",env!("CARGO_PKG_VERSION"),"/")).unwrap_or("");
+            // Restrict reads to flat asset names; prevent traversal and encoded separators.
+            if relative.starts_with("assets/") && relative.len()<200 &&
+                relative.bytes().all(|b|b.is_ascii_alphanumeric()||b"-_./".contains(&b)) &&
+                !relative.contains("..") && !relative.contains("//") {
+                Some(vue_dir.join(relative))
+            } else {None}
+        } else {None};
+        if let Some(file)=requested {
+            let kind=if route.ends_with(".js") {"application/javascript; charset=utf-8"}
+                 else if route.ends_with(".css") {"text/css; charset=utf-8"}
+                 else {"text/html; charset=utf-8"};
+            let found=fs::read(file).ok();
+            let is_found=found.is_some();
+            let body=found.unwrap_or_default();
+            reply(&mut stream,if is_found{"200 OK"}else{"404 Not Found"},kind,
+                  if method=="HEAD"{&[]}else{&body},"no-cache");
+            return
+        }
+    }
     let snapshot=||state.snapshot.lock().map(|v|v.clone()).unwrap_or(json!({}));
     let (status,kind,body,cache)=match path.split('?').next().unwrap_or("") {
         "/"|"/index.html"=>("200 OK","text/html; charset=utf-8",load_www_file("index.html").unwrap_or_default(),"no-cache"),
