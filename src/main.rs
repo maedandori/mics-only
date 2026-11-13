@@ -179,10 +179,26 @@ fn run(c: Config) -> Result<(), String> {
     let local=local_web::LocalState::new(local_web::default_snapshot_path());
     local_web::start(local.clone())?;
     if !c.enabled {
-        local.set_mode("DISABLED");
-        local.record_sync("DISABLED");
-        println!("MICS standby disabled; local dashboard remains available");
-        loop {thread::sleep(Duration::from_secs(3600))}
+        // Safe MIRROR_ONLY mode: local dashboard can show the primary's
+        // authenticated Cloudflare cache while NEVER opening Firebird or
+        // asking to become ACTIVE. The standby toggle remains OFF.
+        local.set_mode("MIRROR_ONLY");
+        local.record_sync("MIRROR_ONLY");
+        #[cfg(windows)]
+        let mirror_secret=credentials::load().ok().map(|v|v.mics_sync_token).unwrap_or_default();
+        #[cfg(not(windows))]
+        let mirror_secret=env::var("MICS_SYNC_TOKEN").unwrap_or_default();
+        let valid_url=url::Url::parse(&c.coordinator_url).ok()
+            .is_some_and(|u|u.scheme()=="https"&&u.host_str().is_some()
+                &&u.username()==""&&u.password().is_none());
+        loop {
+            if valid_url&&!mirror_secret.is_empty(){
+                if let Err(e)=mirror::refresh(&c,&mirror_secret,&local){
+                    eprintln!("MIRROR_ONLY_CACHE_ERROR {e}");
+                }
+            }
+            thread::sleep(Duration::from_secs(300))
+        }
     }
     // Read secrets once; never print secrets or raw employee/snapshot data.
     // On Windows, use a per-user DPAPI vault distinct from mics-print.
