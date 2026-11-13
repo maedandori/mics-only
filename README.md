@@ -26,3 +26,23 @@ cargo build --release
 ```
 
 Do not store secrets in public repositories or copy credentials from the existing `mics-print` installation. The Windows EXEs are not signed; Windows SmartScreen may warn until signed/reputation established.
+
+## Local-only dashboard / PWA (Windows)
+- The agent itself hosts **http://127.0.0.1:8787/**, whether standby is enabled or disabled.
+- The local web server binds **only 127.0.0.1** (not 0.0.0.0). Other PCs, LAN clients, phones and Internet clients **cannot connect**. This is intentional.
+- Dashboard HTML/CSS/JS, PWA manifest and service worker are compiled into `mics-only.exe`; no additional web executable or external server required.
+- The web UI shows 14 machine nodes in MICS order, the last saved data, status code, progress, counts and cycle.
+- Local snapshot file: `%LOCALAPPDATA%\MICS-Only\data\machines.json`. It updates only when a valid, leased Firebird snapshot differs from the previous sampled snapshot. The file is not a mirror of every MICS table.
+- With **Enable standby agent OFF**, web still opens, displays last saved data or placeholders, and does not touch Firebird or Cloudflare.
+- With standby enabled, Firebird reads and Cloudflare upload remain **fail-closed** behind the Coordinator lease. Do not enable until primary `mics-print` participates in the lease protocol.
+- The local PWA can be installed from the local Windows browser because `localhost` is a secure context. A PWA installed here does not make the server reachable from other devices, including iPhone.
+- The page polls local `/api/machines` and `/api/status` every 3 seconds. These requests never reach D1/Turso/Cloudflare.
+
+### Test Connection / 接続テスト
+Open `mics-only-settings.exe` and click **Test Connection** (tests only the **saved** INI):
+1. Connects to Firebird **TCP port** for network reachability without login or SQL.
+2. GETs the Coordinator `/health` endpoint if configured, without asking for a lease.
+3. Never uploads or reads rows from Firebird. This is **not** an authentication or database-read validation test.
+CLI equivalent: `mics-only.exe --test-connection`.
+
+**Open Local Web** opens the browser at `http://127.0.0.1:8787/`. Save still restarts the agent. Only two EXEs remain.
