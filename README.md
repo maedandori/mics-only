@@ -118,3 +118,5 @@ Every Coordinator /presence heartbeat now includes the installed mics-only versi
 A remote update request is queued in Cloudflare D1, returned on the normal 60-second /presence response, and applied using the existing GitHub Release downloader and rollback helper. The agent does not stop during an ACTIVE Firebird lease. An enabled standby waits until its local mode is STANDBY, while a disabled standby can update in MIRROR_ONLY mode. Existing mics.ini, DPAPI secrets, production snapshots, and print agents are not modified. Presence reports the new version after restart so Admin can mark the queued request completed.
 
 Note: Earlier v0.2.4 and older versions do not support remote commands. Upgrade those once using the local Settings GitHub Update button; subsequent releases can be requested from Admin.
+
+Admin remote update diagnostics: a failed Windows health check writes data/update-blocked-version.txt. The next /presence heartbeat reports that version; the Admin request transitions to failed rather than remaining pending. Examine data/update.log and wait for a corrected Release before retrying.
