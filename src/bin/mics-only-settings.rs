@@ -44,6 +44,14 @@ fn main() {
         .check_state(if get("enabled","0")=="1" {nwg::CheckBoxState::Checked}else{nwg::CheckBoxState::Unchecked})
         .build(&mut enable).unwrap();
 
+    // A human-readable label, distinct from the immutable Coordinator Agent ID.
+    let mut display_name_label=nwg::Label::default();
+    nwg::Label::builder().text("PC名 / Tên máy").parent(&window)
+        .position((540,43)).size((220,22)).build(&mut display_name_label).unwrap();
+    let mut display_name=nwg::TextInput::default();
+    nwg::TextInput::builder().text(&get("display_name","")).parent(&window)
+        .position((540,66)).size((220,25)).build(&mut display_name).unwrap();
+
     let mut labels=Vec::<nwg::Label>::new();
     let mut inputs=Vec::<nwg::TextInput>::new();
     let names=[
@@ -146,12 +154,14 @@ fn main() {
     let save=Rc::new(save);
     let close=Rc::new(close);
     let fields=Rc::new(inputs);
+    let display_name=Rc::new(display_name);
     let secret_fields=Rc::new(secrets);
     let state=Rc::new(RefCell::new(false));
     let state2=state.clone();
 
     let _handler=nwg::full_bind_event_handler(&window.handle,{
         let fields=fields.clone();
+        let display_name=display_name.clone();
         let secret_fields=secret_fields.clone();
         let enable=enable.clone();
         let autostart=autostart.clone();
@@ -235,6 +245,9 @@ fn main() {
                     if value.contains(['\r','\n']) {return Err(format!("Invalid newline in {k}"))}
                     cfg.insert(*k,value);
                 }
+                let device_name=display_name.text().trim().to_owned();
+                if device_name.chars().count()>60||device_name.contains(['\\r','\\n']){return Err("Tên máy phải dưới 60 ký tự, không chứa xuống dòng".into())}
+                cfg.insert("display_name",device_name);
                 let enabled=enable.check_state()==nwg::CheckBoxState::Checked;
                 let number=cfg["port"].parse::<u16>().map_err(|_|"Invalid Firebird port")?;
                 if number==0{return Err("Invalid Firebird port".into())}
@@ -268,6 +281,7 @@ fn main() {
                 }
                 let mut lines=vec!["[mics]".to_string(),format!("enabled={}",if enabled {1}else{0})];
                 for key in keys {lines.push(format!("{key}={}",cfg[key]));}
+                lines.push(format!("display_name={}",cfg["display_name"]));
                 let tmp=ini.with_extension("ini.tmp");
                 fs::write(&tmp,format!("{}\n",lines.join("\n"))).map_err(|e|e.to_string())?;
                 // Persist the vault before changing enabled state; never write passwords into INI.
