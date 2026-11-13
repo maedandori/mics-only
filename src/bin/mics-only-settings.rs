@@ -194,7 +194,7 @@ fn main() {
                 fs::rename(&tmp,&ini).map_err(|e|e.to_string())?;
                 let run_key=r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
                 // Quote the full executable path so paths containing spaces work.
-                let run_value=format!("\\\"{}\\\"",agent_exe.display());
+                let run_value=format!(r#"\"{}\""#,agent_exe.display());
                 let mut reg=Command::new("reg");
                 if autostart.check_state()==nwg::CheckBoxState::Checked {
                     reg.args(["add",run_key,"/v","MICS-Only-Agent","/t","REG_SZ","/d",&run_value,"/f"]);
