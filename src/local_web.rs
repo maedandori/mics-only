@@ -152,10 +152,12 @@ pub fn start(state:LocalState)->Result<(),String>{
     Ok(())
 }
 pub fn default_snapshot_path()->PathBuf{
-    let base=std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
-        .or_else(||std::env::current_exe().ok().and_then(|p|p.parent().map(Path::to_path_buf)))
+    // Portable data lives beside mics-only.exe, never in %LOCALAPPDATA%.
+    // This also keeps machines, schedule, and sync status in one directory.
+    let base=std::env::current_exe().ok()
+        .and_then(|p|p.parent().map(Path::to_path_buf))
         .unwrap_or_else(||PathBuf::from("."));
-    base.join("MICS-Only").join("data").join("machines.json")
+    base.join("data").join("machines.json")
 }
 
 #[cfg(test)]
