@@ -328,7 +328,7 @@ fn test_connection(c:&Config)->Result<(),String>{
     if !ok{return Err("Firebird TCP connectivity FAILED (no database login attempted)".into())}
     println!("FIREBIRD_TCP_OK (no SQL executed)");
     if c.coordinator_url.is_empty(){
-        println!("COORDINATOR_NOT_CONFIGURED");return Ok(())
+        return Err("Coordinator URL missing: cannot register this PC in D1".into())
     }
     let health=format!("{}/health",c.coordinator_url.trim_end_matches('/'));
     let response=client().get(&health).call().map_err(|e|format!("COORDINATOR_HTTP_FAILED {e}"))?;
