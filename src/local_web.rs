@@ -39,6 +39,17 @@ impl LocalState {
         Self{snapshot:Arc::new(Mutex::new(initial)),mode:Arc::new(Mutex::new("STANDBY".into())),
             sync_status:Arc::new(Mutex::new("NOT_SYNCED".into())),last_sync_at:Arc::new(Mutex::new(None)),shift_ng:Arc::new(Mutex::new(shift_state)),data_path}
     }
+    pub fn refresh_shift_boundary(&self) {
+        // Reset the local shift display at 07:30 and 19:00 JST even when
+        // MACHINEWORK counters have not changed since the prior sample.
+        let changed=self.shift_ng.lock().ok()
+            .is_some_and(|t|t.needs_new_shift());
+        if changed {
+            if let Ok(snapshot)=self.snapshot.lock().map(|v|v.clone()) {
+                let _=self.update(snapshot);
+            }
+        }
+    }
     pub fn set_mode(&self,mode:&str) {
         if let Ok(mut m)=self.mode.lock(){*m=mode.to_owned()}
     }
@@ -148,6 +159,7 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
             return
         }
     }
+    if route=="/api/machines"||route=="/api/status" {state.refresh_shift_boundary();}
     let snapshot=||state.snapshot.lock().map(|v|v.clone()).unwrap_or(json!({}));
     let (status,kind,body,cache)=match path.split('?').next().unwrap_or("") {
         "/"|"/index.html"=>("200 OK","text/html; charset=utf-8",load_www_file("index.html").unwrap_or_default(),"no-cache"),
