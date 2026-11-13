@@ -19,7 +19,7 @@ const machineCards=computed(()=>order.map(n=>{
  const m=machineMap.value.get(n)||{}
  const planned=Math.max(0,Number(m.qty_plan)||0),good=Math.max(0,Number(m.qty_ok)||0)
  const totalBad=Math.max(0,Number(m.qty_ng)||0)
- const shiftAvailable=m.qty_ng_shift_status==='observed_from_first_sample'&&Number.isFinite(Number(m.qty_ng_shift))
+ const shiftAvailable=m.qty_ng_shift_status==='mics_today'&&m.qty_ng_shift!=null&&Number.isFinite(Number(m.qty_ng_shift))
  const bad=shiftAvailable?Math.max(0,Number(m.qty_ng_shift)):null
  const remaining=Math.max(0,m.qty_remaining!=null&&Number.isFinite(Number(m.qty_remaining))?Number(m.qty_remaining):planned-good)
  return {n,m,has:machineMap.value.has(n),planned,good,bad,totalBad,remaining,pct:planned?Math.max(0,Math.min(100,good/planned*100)):0,pred:prediction(m)}
@@ -190,7 +190,7 @@ onUnmounted(()=>{clearInterval(timer);document.removeEventListener('fullscreench
   <footer class="page-footer" aria-label="生産サマリー">
    <section class="summary"><div class="stat"><span>機械</span><b>14</b></div><div class="stat"><span>稼働中</span><b>{{running}}</b></div><div class="stat"><span>停止 / 異常</span><b>{{stopped}}</b></div><div class="stat"><span>通信</span><b>{{connected?'LOCAL OK':'OFFLINE'}}</b></div><div class="stat server"><b>{{server.mode||'UNKNOWN'}}</b><span>{{current.sampled_at?'更新: '+new Date(current.sampled_at).toLocaleString('ja-JP'):'保存データなし'}}</span></div></section>
    <div class="footer-settings"><div class="size-dock"><label for="node-size">ノードサイズ</label><span>小</span><input id="node-size" type="range" min="220" max="520" step="10" :value="nodeWidth" @input="saveWidth($event.target.value)"><span>大</span><output>{{nodeWidth}}px</output></div></div>
-   <small class="footer-note">不良数は07:30・19:00 JSTからの観測増分。初回観測前の不良数は含みません。 · ローカル専用 · Vue 3</small>
+   <small class="footer-note">不良数（今シフト）はMICSのTODAYQTYNGを表示。未取得の場合は「—」。 · ローカル専用 · Vue 3</small>
   </footer>
  </main>
 </div>
