@@ -92,3 +92,10 @@ MICS-Only/
 The app creates `data/` when a valid snapshot or sync status is first saved. On the first run after updating, it **copies** any existing JSON from the older `%LOCALAPPDATA%\MICS-Only\data\` folder into `data/`; existing destination files are never overwritten and the originals are not deleted. This change does **not** move the separate Windows DPAPI credentials, which stay under `%LOCALAPPDATA%\MICS-Only\credentials.dpapi`.
 
 Use a folder with Windows write permissions (for example a user-owned directory, not Program Files), so local JSON can be updated.
+
+## All schedule tab (全て)
+The **全て** tab now shows **every row currently available** in `data/schedule-local.json` grouped by MICS machine number. This is not limited to this week, next week, or a 7-day filter. Rows are sorted by `start_at`, with columns for start/end, mold, product, color, order, and inferred change type. Machine snapshot fields remain available under expandable `現在の機械データを表示` on each machine panel.
+
+**Scope:** "all" means all rows currently saved in the local JSON, **not** the entire lifetime of the remote Firebird database. ACTIVE currently fetches up to 30 days; MIRROR_ONLY/STANDBY reflects the available Cloudflare schedule mirror (normally 14 days). The app does not delete or change any Firebird schedule.
+
+The web is served from editable `www/` next to the executable. To update only this UI, copy the newest `www/index.html`, `www/app.js`, `www/style.css`, and `www/sw.js` beside the installed EXEs and refresh the browser; an EXE rebuild is not required. The portable updater intentionally preserves existing local WWW files, so installing a new ZIP by itself may not replace an older UI.
