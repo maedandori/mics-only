@@ -1,1 +1,51 @@
-<!doctype html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0c172b"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css"><title>MICS Local Dashboard</title></head><body><main><header><div><span class="eyebrow">MICS ONLY · LOCAL</span><h1>機械稼働状況 <small>Machine Dashboard</small></h1></div><div class="server"><strong id="server-mode">読み込み中</strong><span id="updated">最新情報を取得中</span></div></header><div id="banner" role="status"></div><section class="summary"><div><span>機械</span><strong id="total">14</strong></div><div><span>稼働中</span><strong id="running">—</strong></div><div><span>停止 / 異常</span><strong id="stopped">—</strong></div><div><span>通信</span><strong id="connection">確認中</strong></div></section><section class="machines" id="machines" aria-live="polite"></section><footer>127.0.0.1 · Local-only · Internet不要 · Data displayed from the most recent saved snapshot</footer></main><script src="/app.js" defer></script></body></html>
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#eef4fb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <title>MICS ONLY · 機械ダッシュボード</title>
+</head>
+<body>
+<div class="app-shell" id="app-shell">
+  <main class="main-content">
+    <header class="page-header">
+      <div><span class="eyebrow">MICS ONLY · LOCAL</span><h1>機械稼働状況</h1><p class="subtitle">生産ダッシュボード</p></div>
+      <div class="server"><strong id="server-mode">読み込み中</strong><span id="updated">最新情報を取得中</span></div>
+    </header>
+    <div id="banner" role="status"></div>
+    <section class="summary" aria-label="概要">
+      <div><span>機械</span><strong id="total">14</strong></div>
+      <div><span>稼働中</span><strong id="running">—</strong></div>
+      <div><span>停止 / 異常</span><strong id="stopped">—</strong></div>
+      <div><span>通信</span><strong id="connection">確認中</strong></div>
+    </section>
+    <section class="machines" id="machines" aria-live="polite"></section>
+    <footer>127.0.0.1 · Local-only · Internet不要 · 保存されたJSONから表示</footer>
+  </main>
+  <aside class="right-menu" id="right-menu" aria-label="サイドメニュー">
+    <div class="menu-heading"><span class="menu-label">MICS ONLY</span><button type="button" class="menu-toggle" id="menu-toggle" aria-label="メニューを閉じる" aria-expanded="true" aria-controls="right-menu" title="メニューを閉じる">❯</button></div>
+    <div class="menu-body" id="menu-body">
+      <div class="menu-section-title">表示設定</div>
+      <p>機械ノードのサイズは画面下部のスライダーで変更できます。</p>
+      <button type="button" id="reset-size" class="reset-button">サイズを標準に戻す</button>
+      <div class="menu-section-title">データ</div>
+      <p>ローカルJSONを使用しています。Cloudflareへの接続は不要です。</p>
+      <span class="menu-note">最終更新: <span id="menu-updated">—</span></span>
+    </div>
+  </aside>
+</div>
+<div class="size-dock" role="group" aria-label="機械ノードの大きさ">
+  <label for="node-size">ノードサイズ</label>
+  <span class="size-small">小</span>
+  <input id="node-size" type="range" min="220" max="520" value="300" step="10" aria-label="機械ノードの幅">
+  <span class="size-large">大</span>
+  <output id="size-output" for="node-size">300px</output>
+</div>
+<script src="/app.js" defer></script>
+</body>
+</html>
