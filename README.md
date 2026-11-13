@@ -138,3 +138,11 @@ The Rust local snapshot adds `qty_ng_shift`, `qty_ng_shift_key`, and `qty_ng_shi
 Day shift: 07:30–19:00 JST. Night shift: 19:00–07:30 JST next morning. `data/shift-ng.json` persists the last observed Firebird counter per machine/order and its accumulated shift-only increments. At each shift boundary, the display resets, even with unchanged Firebird totals. A counter decrease or order change does not create negative deltas or invent unseen defects. The first observation of a shift is the baseline (zero); exact historical defects before the first observation require time-stamped defect events, which the current cumulative counter does not provide. During a Firebird outage/standby period, missed increments cannot be attributed precisely to their shifts.
 
 `www/vue-v0.2.7/` is the versioned frontend build. Older frontends do not show the new metric until they update. The 0.2.7 Release workflow builds Vue and Windows executables and packages both with the existing rollback flow.
+
+## v0.2.8 defect source correction
+
+Important correction: for machine 19, the SQL-confirmed values were `MACHINEWORK.TOTALQTYNG=24` (cumulative) and `MACHINEWORK.TODAYQTYNG=22` (MICS current-period NG). v0.2.7 incorrectly calculated an observed delta from TOTALQTYNG.
+
+The active Firebird reader now reads TODAYQTYNG explicitly and sends `qty_ng_shift` with `qty_ng_shift_status=mics_today`. Dashboard uses it for NG display, fire animation, and warnings; cumulative `qty_ng` remains below for context. No subtractive estimate is used. If the machine is MIRROR_ONLY/STANDBY and its upstream snapshot lacks TODAYQTYNG, current-period NG displays "—" rather than a misleading zero. The upstream primary agent must supply TODAYQTYNG for a correct standby display.
+
+MICS owns the current-period reset. Do not force 19:00 or 19:30 time boundaries in the Local Web: previously observed MICS SYSDEFINE shift settings included 07:30 and 19:30, and the server may use its own counters.
