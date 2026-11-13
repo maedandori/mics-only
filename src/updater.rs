@@ -5,6 +5,10 @@ use std::{fs, io::{Read,Write}, path::Path, process::Command, time::Duration};
 use std::os::windows::process::CommandExt;
 use sha2::{Digest,Sha256};
 const CREATE_NO_WINDOW:u32=0x08000000;
+use std::sync::atomic::{AtomicBool,Ordering};
+static UPDATER_BUSY:AtomicBool=AtomicBool::new(false);
+struct Unlock;
+impl Drop for Unlock{fn drop(&mut self){UPDATER_BUSY.store(false,Ordering::SeqCst)}}
 
 fn parse_version(s:&str)->Option<(u64,u64,u64)>{
  let v=s.strip_prefix('v')?;
@@ -36,6 +40,8 @@ fn release()->Result<Option<(String,String,u64,Option<String>)>,String>{
  Ok(Some((tag.to_owned(),url.to_owned(),size,digest)))
 }
 pub fn install_if_available(exe:&Path)->Result<String,String>{
+ if UPDATER_BUSY.swap(true,Ordering::SeqCst){return Err("Update already running".into())}
+ let _unlock=Unlock;
  let Some((tag,url,size,digest))=release()? else{
   return Ok(format!("Already up to date (v{}).",env!("CARGO_PKG_VERSION")))
  };
@@ -73,7 +79,7 @@ pub fn install_if_available(exe:&Path)->Result<String,String>{
  Command::new("powershell.exe")
   .args(["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File"])
   .arg(&script).arg("-Archive").arg(&zip).arg("-Target").arg(folder)
-  .arg("-ParentId").arg(std::process::id().to_string())
+  .arg("-ParentId").arg(if exe.file_name().and_then(|n|n.to_str())==Some("mics-only.exe"){0}else{std::process::id()}.to_string())
   .arg("-Version").arg(&tag)
   .creation_flags(CREATE_NO_WINDOW).spawn()
   .map_err(|e|format!("Cannot start update helper: {e}"))?;
