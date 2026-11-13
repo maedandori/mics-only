@@ -30,7 +30,7 @@ fn main() {
     let get = |k:&str,d:&str| original.get(k).cloned().unwrap_or_else(||d.into());
 
     let mut window=nwg::Window::default();
-    nwg::Window::builder().size((790,730)).position((190,65))
+    nwg::Window::builder().size((790,780)).position((190,65))
         .title("MICS Only Settings / MICS 予備機設定")
         .build(&mut window).expect("Window error");
 
@@ -82,24 +82,37 @@ fn main() {
             .position((335,y)).size((425,29)).build(&mut input).unwrap();
         secret_labels.push(label);secrets.push(input);
     }
+    let mut autostart=nwg::CheckBox::default();
+    // HKCU Run starts the agent at Windows sign-in, without administrator rights.
+    let run_key=r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+    let startup_enabled=Command::new("reg")
+        .args(["query",run_key,"/v","MICS-Only-Agent"])
+        .creation_flags(0x08000000).output()
+        .map(|o|o.status.success()).unwrap_or(false);
+    nwg::CheckBox::builder()
+        .text("Start agent with Windows / Windows起動時に実行")
+        .parent(&window).position((25,591)).size((680,28))
+        .check_state(if startup_enabled {nwg::CheckBoxState::Checked}else{nwg::CheckBoxState::Unchecked})
+        .build(&mut autostart).unwrap();
+
     let mut note=nwg::Label::default();
     nwg::Label::builder().text(
         "Blank secret fields retain DPAPI values. Tokens are separate from mics-print."
-    ).parent(&window).position((25,599)).size((735,25)).build(&mut note).unwrap();
+    ).parent(&window).position((25,624)).size((735,25)).build(&mut note).unwrap();
 
     let mut status=nwg::Label::default();
     nwg::Label::builder().text(if credentials::configured() {
         "Credentials: stored separately with Windows DPAPI"
     }else{
         "Credentials: not configured"
-    }).parent(&window).position((25,626)).size((735,25)).build(&mut status).unwrap();
+    }).parent(&window).position((25,651)).size((735,25)).build(&mut status).unwrap();
 
     let mut save=nwg::Button::default();
     nwg::Button::builder().text("Save / 保存").parent(&window)
-        .position((470,665)).size((140,36)).build(&mut save).unwrap();
+        .position((470,695)).size((140,36)).build(&mut save).unwrap();
     let mut close=nwg::Button::default();
     nwg::Button::builder().text("Close / 閉じる").parent(&window)
-        .position((620,665)).size((140,36)).build(&mut close).unwrap();
+        .position((620,695)).size((140,36)).build(&mut close).unwrap();
 
     let fields=Rc::new(inputs);
     let secret_fields=Rc::new(secrets);
@@ -111,6 +124,7 @@ fn main() {
         let fields=fields.clone();
         let secret_fields=secret_fields.clone();
         let enable=enable.clone();
+        let autostart=autostart.clone();
         let save=save.clone();
         let close=close.clone();
         let ini=ini.clone();
@@ -178,6 +192,19 @@ fn main() {
                     fs::remove_file(&ini).map_err(|e|e.to_string())?;
                 }
                 fs::rename(&tmp,&ini).map_err(|e|e.to_string())?;
+                let run_key=r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+                // Quote the full executable path so paths containing spaces work.
+                let run_value=format!("\\\"{}\\\"",agent_exe.display());
+                let mut reg=Command::new("reg");
+                if autostart.check_state()==nwg::CheckBoxState::Checked {
+                    reg.args(["add",run_key,"/v","MICS-Only-Agent","/t","REG_SZ","/d",&run_value,"/f"]);
+                } else {
+                    reg.args(["delete",run_key,"/v","MICS-Only-Agent","/f"]);
+                }
+                let output=reg.creation_flags(0x08000000).output().map_err(|e|format!("Windows startup setting failed: {e}"))?;
+                if !output.status.success() && autostart.check_state()==nwg::CheckBoxState::Checked {
+                    return Err(format!("Startup registry update failed: {}",String::from_utf8_lossy(&output.stderr)));
+                }
                 Ok(())
             })();
             *state2.borrow_mut()=false;
@@ -200,7 +227,7 @@ fn main() {
         }
     });
     // Keep window-owned controls alive for the duration of the event loop.
-    let _controls=(heading,labels,secret_labels,note,status,save,close,enable,state,form_window);
+    let _controls=(heading,labels,secret_labels,note,status,save,close,enable,autostart,state,form_window);
     nwg::dispatch_thread_events();
 }
 #[cfg(not(windows))]
