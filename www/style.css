@@ -399,3 +399,39 @@
  .node .progress b{font-size:13px}
  .node .progress small{top:42px}
 }
+
+/* No heading above machine nodes: small control rail at browser's top-left,
+   dashboard starts alongside it immediately below browser chrome. */
+.layout{min-height:100vh}
+.layout > main{
+ position:relative;max-width:none;width:100%;margin:0;
+ padding:4px 9px 16px 129px;
+}
+.app-top-layout{
+ position:absolute;left:8px;top:4px;
+ display:block;min-height:0;margin:0;width:112px;
+ z-index:10;
+}
+.top-command-area{width:112px;display:grid;gap:4px}
+.top-command-area .menu-toggle{height:32px}
+.top-command-area .fullscreen-toggle{height:29px}
+.page-title-compact,.topbar{display:none!important}
+#dashboard-view,#schedule-view,#all-view{margin-top:0;padding-top:0}
+.machines{margin-top:0;row-gap:7px;column-gap:7px}
+.node{padding:7px 8px 7px!important;min-height:0!important}
+.node .status,.node .status-code{display:none!important}
+.node .next-change{margin-bottom:0}
+.ng-alerts:not([hidden]){margin:0 0 5px!important;padding:0 0 2px!important}
+.page-footer{margin-top:13px}
+@media(max-width:720px){
+ .layout > main{padding:4px 7px 14px 106px}
+ .app-top-layout{left:5px;top:4px;width:94px}
+ .top-command-area{width:94px}
+ .top-command-area .menu-toggle{font-size:11px}
+ .top-command-area .fullscreen-toggle{font-size:10px}
+}
+@media(max-width:420px){
+ /* Keep the controls accessible without making node text unreadably narrow. */
+ .layout > main{padding:69px 6px 12px}
+ .app-top-layout{left:6px;top:3px;width:96px}
+}
