@@ -4,7 +4,6 @@ mod credentials;
 #[cfg(windows)]
 mod updater;
 mod local_web;
-mod shift_ng;
 mod schedule;
 mod mirror;
 use chrono::{DateTime, Utc};
