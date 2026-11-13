@@ -13,9 +13,55 @@ function drawDashboard(){
 }
 const dataFields=[["machine_no","機械番号"],["status_code","ステータス"],["mold_name","金型名"],["mold_no","金型番号"],["order_no","製造番号"],["product_name","品名"],["qty_plan","予定数"],["qty_ok","良品数"],["qty_ng","不良数"],["qty_remaining","残数"],["cycle_seconds","実績サイクル"],["pick_qty","取り数"],["staff_name","担当者"],["scheduled_end_at","完了予定"]];
 function drawAll(){
- const map=new Map((current.machines||[]).map(m=>[+m.machine_no,m]));
+ // ALL shows every stored schedule row per machine, across all available dates.
+ // The current machine snapshot is kept in a collapsible secondary section.
+ const snapshotMap=new Map((current.machines||[]).map(m=>[Number(m.machine_no),m]));
+ const rows=Array.isArray(schedule.rows)?schedule.rows:[];
+ const byMachine=new Map(order.map(n=>[n,[]]));
+ for(const r of rows){
+   const n=Number(r.machine_no);
+   if(byMachine.has(n))byMachine.get(n).push(r);
+ }
+ for(const list of byMachine.values()){
+   list.sort((a,b)=>String(a.start_at||"").localeCompare(String(b.start_at||""))||
+     String(a.sequence||"").localeCompare(String(b.sequence||"")));
+ }
+ const total=rows.length;
+ const meta=$("all-meta");
+ if(meta){
+   meta.textContent=`ローカル保存スケジュール: ${total} 件 · 全期間表示`+
+     (schedule.from&&schedule.to?` · ${schedule.from} ～ ${schedule.to}`:"");
+ }
  $("all-machines").innerHTML=order.map(n=>{
- const m=map.get(n);return `<article class="all-card"><header><b class="machine-number">#${n}</b><span class="status">${m?esc(names[m.status_code]||m.status_code||"不明"):"データなし"}</span></header>${m?`<dl>${[...dataFields,...Object.keys(m).filter(key=>!dataFields.some(([known])=>known===key)).map(key=>[key,key])].map(([key,label])=>`<dt>${esc(label)}</dt><dd>${esc(typeof m[key]==="object"?JSON.stringify(m[key]):m[key]??"—")}</dd>`).join("")}</dl>`:'<div class="empty">保存データなし</div>'}</article>`;
+   const m=snapshotMap.get(n);
+   const entries=byMachine.get(n);
+   const details=m?`<details class="snapshot-details"><summary>現在の機械データを表示</summary><dl>${
+     [...dataFields,...Object.keys(m).filter(key=>!dataFields.some(([known])=>known===key)).map(key=>[key,key])]
+      .map(([key,label])=>`<dt>${esc(label)}</dt><dd>${esc(typeof m[key]==="object"?JSON.stringify(m[key]):m[key]??"—")}</dd>`).join("")
+   }</dl></details>`:"";
+   const list=entries.length?entries.map((r,i)=>{
+     const change=classify(entries[i-1],r);
+     const tag=change==="mold"?"型替え":change==="color"?"色替え":"";
+     return `<tr>
+      <td class="when">${esc(r.start_at||"—")}</td>
+      <td class="when">${esc(r.end_at||"—")}</td>
+      <td>${esc(r.mold_name||"—")}<div class="product">${esc(r.mold_no||"")}</div></td>
+      <td>${esc(r.product_name||"—")}</td>
+      <td>${esc(r.color||"—")}</td>
+      <td>${esc(r.order_no||"—")}</td>
+      <td>${tag?`<span class="tag ${change}">${tag}</span>`:"—"}</td>
+     </tr>`;
+   }).join(""):"";
+   return `<article class="all-card machine-schedule"><header>
+     <b class="machine-number">#${n}</b>
+     <span class="count">${entries.length} 件</span>
+     <span class="status">${m?esc(names[m.status_code]||m.status_code||"不明"):"データなし"}</span>
+   </header>
+   ${entries.length?`<div class="schedule-table-scroll"><table class="schedule-table">
+     <thead><tr><th>開始</th><th>終了</th><th>金型</th><th>品名</th><th>色</th><th>製造番号</th><th>変更</th></tr></thead>
+     <tbody>${list}</tbody>
+   </table></div>`:'<p class="empty">保存された予定はありません</p>'}
+   ${details}</article>`;
  }).join("");
 }
 const monday=(offset)=>{const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-(d.getDay()+6)%7+offset*7);return d};
