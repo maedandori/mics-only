@@ -140,9 +140,7 @@ fn read(c: &Config, password: &str) -> Result<Value, String> {
     let today_rows: Vec<(i64,)> = db.query(
         "SELECT COUNT(*) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='MACHINEWORK' AND TRIM(RDB$FIELD_NAME)='TODAYQTYNG'", ()
     ).map_err(|e| e.to_string())?;
-    let today_ng = if today_rows.first().is_some_and(|r|r.0>0) {
-        "COALESCE(TRIM(CAST(W.TODAYQTYNG AS VARCHAR(24))), '')"
-    } else { "CAST('' AS VARCHAR(24))" };
+
     let sql = format!(
         "SELECT TRIM(CAST(W.MACHINENO AS VARCHAR(24))),
          COALESCE(TRIM(CAST(W.MORDERNO AS VARCHAR(40))), ''),
@@ -155,18 +153,31 @@ fn read(c: &Config, password: &str) -> Result<Value, String> {
          COALESCE(TRIM(CAST(W.STAFFNAME AS VARCHAR(100))), ''),
          COALESCE(TRIM(CAST(W.QTYPLAN AS VARCHAR(24))), ''),
          COALESCE(TRIM(CAST(W.REALCYCLETIME AS VARCHAR(24))), ''),
-         {mend}, {pick}, {today_ng}
+         {mend}, {pick}
          FROM MACHINEWORK W
          LEFT JOIN SCHEDULE S ON S.MORDERNO=W.MORDERNO AND S.MACHINENO=W.MACHINENO AND COALESCE(S.DELETEFLG,0)=0
          LEFT JOIN TOOL T ON T.ENTRYNO=S.TOOLENTRYNO
          WHERE W.MACHINENO IN (5,6,7,8,10,11,12,13,14,15,16,17,18,19)
          ORDER BY W.MACHINENO"
     );
-    type Row = (String,String,String,String,String,String,String,String,String,String,String,String,String,String);
+    type Row = (String,String,String,String,String,String,String,String,String,String,String,String,String);
     let rows: Vec<Row> = db.query(&sql, ()).map_err(|e| e.to_string())?;
+    // A separate query avoids extending the 13-column Firebird row tuple.
+    // MICS maintains TODAYQTYNG itself, so no local shift subtraction is needed.
+    let mut today_by_machine: BTreeMap<i32,i64> = BTreeMap::new();
+    if today_rows.first().is_some_and(|r|r.0>0) {
+        let today_values: Vec<(String,String)> = db.query(
+            "SELECT TRIM(CAST(MACHINENO AS VARCHAR(24))), COALESCE(TRIM(CAST(TODAYQTYNG AS VARCHAR(24))), '') FROM MACHINEWORK WHERE MACHINENO IN (5,6,7,8,10,11,12,13,14,15,16,17,18,19)", ()
+        ).map_err(|e|e.to_string())?;
+        for (no,ng) in today_values {
+            if let (Ok(n),Ok(count))=(no.parse::<i32>(),ng.parse::<i64>()) {
+                if count>=0 {today_by_machine.entry(n).and_modify(|v|*v=(*v).max(count)).or_insert(count);}
+            }
+        }
+    }
     let qty = |s: &str| s.trim().parse::<i64>().unwrap_or(0).max(0);
     let mut result: BTreeMap<i32, Value> = BTreeMap::new();
-    for (machine, order, status, product, tool_no, mold, good, bad, staff, plan, cycle, scheduled_end, pick, today_bad) in rows {
+    for (machine, order, status, product, tool_no, mold, good, bad, staff, plan, cycle, scheduled_end, pick) in rows {
         let Ok(no) = machine.parse::<i32>() else {continue};
         if let Some(existing) = result.get_mut(&no) {
             if existing["order_no"] != order || existing["mold_name"] != mold {
@@ -181,8 +192,8 @@ fn read(c: &Config, password: &str) -> Result<Value, String> {
             "machine_no": no, "order_no":order, "status_code":status,
             "product_name":product, "mold_no":tool_no, "mold_name":mold,
             "qty_plan":p, "qty_ok":ok, "qty_ng":qty(&bad),
-             "qty_ng_shift":today_bad.trim().parse::<i64>().ok().filter(|n|*n>=0),
-             "qty_ng_shift_status":if today_bad.trim().parse::<i64>().ok().is_some_and(|n|n>=0){"mics_today"}else{"unavailable"},
+             "qty_ng_shift":today_by_machine.get(&no).copied(),
+             "qty_ng_shift_status":if today_by_machine.contains_key(&no){"mics_today"}else{"unavailable"},
             "qty_remaining":(p-ok).max(0),
             "cycle_seconds":cycle.parse::<f64>().ok(),
             "pick_qty":pick.trim().parse::<f64>().ok().filter(|n| n.is_finite() && *n > 0.0),
