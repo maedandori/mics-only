@@ -4,7 +4,8 @@
 #[cfg(windows)]
 fn main() {
     use native_windows_gui as nwg;
-    use std::{cell::RefCell, collections::BTreeMap, fs, path::PathBuf, rc::Rc};
+    use std::{cell::RefCell, collections::BTreeMap, fs, path::PathBuf, process::Command, rc::Rc};
+    use std::os::windows::process::CommandExt;
     nwg::init().expect("Cannot initialize Windows GUI");
     nwg::Font::set_global_family("Segoe UI").expect("Font error");
 
@@ -113,6 +114,7 @@ fn main() {
         let save=save.clone();
         let close=close.clone();
         let ini=ini.clone();
+        let agent_exe=home.join("mics-only.exe");
         let window=form_window.clone();
         move |event,_,handle| {
             if event==nwg::Event::OnWindowClose {
@@ -180,7 +182,19 @@ fn main() {
             })();
             *state2.borrow_mut()=false;
             match result {
-                Ok(())=> {nwg::simple_message("MICS Only", "Saved. Restart mics-only.exe to apply changes.");nwg::stop_thread_dispatch();},
+                Ok(())=> {
+                    // Only restart our own agent, never mics-print or the print-only agent.
+                    // Stop-then-start avoids two mics-only instances competing for Firebird.
+                    let _ = Command::new("taskkill").args(["/F", "/IM", "mics-only.exe"])
+                        .creation_flags(0x08000000).status();
+                    match Command::new(&agent_exe).creation_flags(0x08000000).spawn() {
+                        Ok(_) => {
+                            nwg::simple_message("MICS Only", "Saved. MICS-only agent restarted with new settings.");
+                            nwg::stop_thread_dispatch();
+                        }
+                        Err(err) => nwg::error_message("MICS Only", &format!("Saved, but could not start agent: {err}")),
+                    }
+                },
                 Err(e)=>{nwg::error_message("MICS Only Settings", &e);},
             }
         }
