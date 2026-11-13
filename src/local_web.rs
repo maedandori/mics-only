@@ -106,6 +106,11 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
         "/manifest.webmanifest"=>("200 OK","application/manifest+json",load_www_file("manifest.webmanifest").unwrap_or_default(),"no-cache"),
         "/icon.svg"=>("200 OK","image/svg+xml",load_www_file("icon.svg").unwrap_or_default(),"public, max-age=86400"),
         "/api/machines"=>("200 OK","application/json; charset=utf-8",serde_json::to_vec(&snapshot()).unwrap_or_default(),"no-store"),
+        "/api/schedule"=>{
+            let path=state.data_path.with_file_name("schedule-local.json");
+            let bytes=fs::read(path).unwrap_or_else(|_|b"{\"rows\":[],\"from\":null,\"to\":null}".to_vec());
+            ("200 OK","application/json; charset=utf-8",bytes,"no-store")
+        },
         "/api/status"=>{
             let mode=state.mode.lock().map(|s|s.clone()).unwrap_or("UNKNOWN".into());
             let v=snapshot();
