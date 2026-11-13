@@ -32,7 +32,7 @@ Do not store secrets in public repositories or copy credentials from the existin
 - The local web server binds **only 127.0.0.1** (not 0.0.0.0). Other PCs, LAN clients, phones and Internet clients **cannot connect**. This is intentional.
 - Dashboard HTML/CSS/JS, PWA manifest and service worker are editable files in `www/` next to the two executables. The Agent serves them from local disk; no external server required.
 - The web UI shows 14 machine nodes in MICS order, the last saved data, status code, progress, counts and cycle.
-- Local snapshot file: `%LOCALAPPDATA%\MICS-Only\data\machines.json`. It updates only when a valid, leased Firebird snapshot differs from the previous sampled snapshot. The file is not a mirror of every MICS table.
+- Local snapshot file: `<EXE_FOLDER>\data\machines.json`. It updates only when a valid, leased Firebird snapshot differs from the previous sampled snapshot. The file is not a mirror of every MICS table.
 - With **Enable standby agent OFF**, web still opens, displays last saved data or placeholders, and does not touch Firebird or Cloudflare.
 - With standby enabled, Firebird reads and Cloudflare upload remain **fail-closed** behind the Coordinator lease. Do not enable until primary `mics-print` participates in the lease protocol.
 - The local PWA can be installed from the local Windows browser because `localhost` is a secure context. A PWA installed here does not make the server reachable from other devices, including iPhone.
@@ -55,8 +55,8 @@ Settings has **Start Agent**, **Stop Agent**, **Restart Agent**, and **GitHub Up
 - A backup `.bak` of each existing EXE is retained during an update. If the update fails, inspect `%TEMP%\MICS-Only-Update\update-error.log`; automatic rollback is not yet implemented.
 - If a modified web file should be replaced with the new default, rename it before updating.
 - A successful Rust build and published GitHub Release must be confirmed before using the update button.
-- `%LOCALAPPDATA%\MICS-Only\data\machines.json`: last valid Firebird snapshot, updated only when machine values change and a Coordinator lease permits reading.
-- `%LOCALAPPDATA%\MICS-Only\data\sync-status.json`: last sync acknowledgement/status, with no credentials.
+- `<EXE_FOLDER>\data\machines.json`: last valid Firebird snapshot, updated only when machine values change and a Coordinator lease permits reading.
+- `<EXE_FOLDER>\data\sync-status.json`: last sync acknowledgement/status, with no credentials.
 - With a valid Coordinator lease, uploads use the existing `/sync` endpoint and retry after failures during a later authorized read. When denied lease, no Firebird reads or uploads occur.
 - Only one agent may own the lease; production failover remains disabled until `mics-print` participates in the same Coordinator.
 
@@ -66,8 +66,29 @@ The only browser URL is `http://127.0.0.1:8787` on the Windows machine running m
 - **予定**: current/next JST production calendar weeks, all/color-change/mold-change filters and 14 machine schedules. The online admin color dictionary is not yet mirrored: local change classification compares mold codes and raw schedule color fields.
 - **全て**: all keys for each machine's saved JSON snapshot, including additional fields received from the primary mirror.
 - Editable files: `www/index.html`, `www/style.css`, `www/app.js` (plus service worker, manifest, SVG).
-- `%LOCALAPPDATA%\MICS-Only\data\machines.json` and `schedule-local.json` persist across restarts. The latter holds up to 30 days when mics-only is ACTIVE.
+- `<EXE_FOLDER>\data\machines.json` and `schedule-local.json` persist across restarts. The latter holds up to 30 days when mics-only is ACTIVE.
 - **MIRROR_ONLY** (Enable standby OFF): reads the token-authenticated Cloudflare machine+schedule mirror at most once every 5 minutes if the coordinator URL and backup sync token are available. No Firebird access and no lease acquisition. The local web remains private to this PC.
 - **STANDBY** (Enable standby ON, lease denied): also refreshes the read-only primary mirror at most every 5 minutes.
 - **ACTIVE** (lease granted): reads Firebird, writes snapshots to disk, and posts changed machine and 14-day schedule data through coordinator-fenced endpoints.
 - `MICS_FAILOVER_ENABLED` stays OFF on Cloudflare until the **new primary** `mics-print` binaries are installed and configured for the lease. Do not activate backup writes in production before verifying the new primary.
+
+## Portable JSON data folder
+
+Machine and schedule data now live **beside mics-only.exe** in its writable `data/` folder:
+
+```text
+MICS-Only/
+  mics-only.exe
+  mics-only-settings.exe
+  mics.ini
+  www/
+  data/
+    machines.json
+    schedule-local.json
+    sync-status.json
+    schedule-last-ack.sha256
+```
+
+The app creates `data/` when a valid snapshot or sync status is first saved. On the first run after updating, it **copies** any existing JSON from the older `%LOCALAPPDATA%\MICS-Only\data\` folder into `data/`; existing destination files are never overwritten and the originals are not deleted. This change does **not** move the separate Windows DPAPI credentials, which stay under `%LOCALAPPDATA%\MICS-Only\credentials.dpapi`.
+
+Use a folder with Windows write permissions (for example a user-owned directory, not Program Files), so local JSON can be updated.
