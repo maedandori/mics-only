@@ -133,7 +133,7 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
             let mode=state.mode.lock().map(|s|s.clone()).unwrap_or("UNKNOWN".into());
             let v=snapshot();
             ("200 OK","application/json; charset=utf-8",serde_json::to_vec(&json!({
-                "ok":true,"mode":mode,"sampled_at":v.get("sampled_at"),"machine_count":v["machines"].as_array().map(|a|a.len()).unwrap_or(0),
+                "ok":true,"version":env!("CARGO_PKG_VERSION"),"mode":mode,"sampled_at":v.get("sampled_at"),"machine_count":v["machines"].as_array().map(|a|a.len()).unwrap_or(0),
                 "server":"127.0.0.1:8787",
                 "sync_status":state.sync_status.lock().map(|s|s.clone()).unwrap_or("UNKNOWN".into()),
                 "last_sync_at":state.last_sync_at.lock().ok().and_then(|v|v.clone())
