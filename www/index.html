@@ -5,6 +5,25 @@
 <section id="dashboard-view" class="view"><div class="machines" id="machines"></div></section>
 <section id="schedule-view" class="view" hidden><div class="toolbar"><div class="week-controls"><button id="current-week" class="pill selected">今週</button><button id="next-week" class="pill">来週</button></div><div class="filters"><button class="pill selected" data-filter="all">全て</button><button class="pill" data-filter="color">色替え</button><button class="pill" data-filter="mold">型替え</button></div></div><p id="schedule-meta" class="muted"></p><div id="schedule-machines" class="schedule-grid"></div></section>
 <section id="all-view" class="view" hidden><p class="muted" id="all-meta">このPCに保存された全期間の予定を機械別に表示します。</p><div id="all-machines" class="all-grid"></div></section>
-<div class="page-bottom-controls"><div class="size-dock" id="size-dock"><label for="node-size">ノードサイズ</label><span>小</span><input id="node-size" type="range" min="220" max="520" step="10" value="300"><span>大</span><output id="size-output" for="node-size">300px</output></div></div></main><aside class="sidebar" id="right-menu"><div class="logo">MICS <span>LOCAL</span><button class="menu-toggle" id="menu-toggle" type="button" aria-expanded="true" aria-label="メニューを閉じる" title="メニューを閉じる">❯</button></div>
-<nav aria-label="Main menu"><button class="nav active" data-view="dashboard">◉　ダッシュボード</button><button class="nav" data-view="schedule">▦　予定</button><button class="nav" data-view="all">☷　全て</button></nav>
-<div class="side-foot">127.0.0.1:8787<br>ローカル専用</div></aside></div><script src="/app.js" defer></script></body></html>
+<footer class="page-footer" id="right-menu" aria-label="画面操作">
+ <div class="footer-navigation">
+   <div class="footer-brand">MICS <span>LOCAL</span></div>
+   <button type="button" class="menu-toggle" id="menu-toggle" aria-expanded="true" aria-controls="footer-nav" aria-label="メニューを閉じる" title="メニューを閉じる">❯</button>
+   <nav class="footer-nav" id="footer-nav" aria-label="Main menu">
+    <button class="nav active" data-view="dashboard">◉ ダッシュボード</button>
+    <button class="nav" data-view="schedule">▦ 予定</button>
+    <button class="nav" data-view="all">☷ 全て</button>
+   </nav>
+ </div>
+ <div class="footer-settings">
+  <div class="size-dock" id="size-dock">
+   <label for="node-size">ノードサイズ</label><span>小</span>
+   <input id="node-size" type="range" min="220" max="520" step="10" value="300" aria-label="機械ノードのサイズ">
+   <span>大</span><output id="size-output" for="node-size">300px</output>
+  </div>
+  <button type="button" class="fullscreen-toggle" id="fullscreen-toggle" aria-label="全画面表示に切り替え" title="全画面表示">⛶ 全画面</button>
+ </div>
+ <small class="footer-note">127.0.0.1:8787 · ローカル専用</small>
+</footer>
+</main></div>
+<div class="ng-alerts" id="ng-alerts" role="status" aria-live="polite" aria-atomic="true" hidden></div><script src="/app.js" defer></script></body></html>
