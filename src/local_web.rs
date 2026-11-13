@@ -12,6 +12,24 @@ pub struct LocalState {
 }
 impl LocalState {
     pub fn new(data_path:PathBuf)->Self {
+        // Migrate old LocalAppData JSON once, only for the real application path.
+        // Copy rather than move: a failed copy never destroys the original cache.
+        if data_path==default_snapshot_path() {
+            if let (Some(old_root), Some(dest))=(std::env::var_os("LOCALAPPDATA"),data_path.parent()) {
+                let old_dir=PathBuf::from(old_root).join("MICS-Only").join("data");
+                if old_dir!=dest && old_dir.is_dir() {
+                    for name in ["machines.json","schedule-local.json","sync-status.json","schedule-last-ack.sha256"] {
+                        let src=old_dir.join(name);
+                        let dst=dest.join(name);
+                        if src.is_file() && !dst.exists() {
+                            if fs::create_dir_all(dest).is_ok() {
+                                let _=fs::copy(&src,&dst);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let initial=fs::read(&data_path).ok()
             .and_then(|raw|serde_json::from_slice::<Value>(&raw).ok())
             .filter(|v|v.get("machines").and_then(Value::as_array).is_some())
