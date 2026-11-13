@@ -114,9 +114,12 @@ fn main() {
     nwg::Button::builder().text("Close / 閉じる").parent(&window)
         .position((620,695)).size((140,36)).build(&mut close).unwrap();
 
+    let enable=Rc::new(enable);
+    let autostart=Rc::new(autostart);
+    let save=Rc::new(save);
+    let close=Rc::new(close);
     let fields=Rc::new(inputs);
     let secret_fields=Rc::new(secrets);
-    let form_window=window.clone();
     let state=Rc::new(RefCell::new(false));
     let state2=state.clone();
 
@@ -129,7 +132,6 @@ fn main() {
         let close=close.clone();
         let ini=ini.clone();
         let agent_exe=home.join("mics-only.exe");
-        let window=form_window.clone();
         move |event,_,handle| {
             if event==nwg::Event::OnWindowClose {
                 nwg::stop_thread_dispatch();
@@ -219,7 +221,7 @@ fn main() {
                             nwg::simple_message("MICS Only", "Saved. MICS-only agent restarted with new settings.");
                             nwg::stop_thread_dispatch();
                         }
-                        Err(err) => nwg::error_message("MICS Only", &format!("Saved, but could not start agent: {err}")),
+                        Err(err) => { nwg::error_message("MICS Only", &format!("Saved, but could not start agent: {err}")); },
                     }
                 },
                 Err(e)=>{nwg::error_message("MICS Only Settings", &e);},
@@ -227,7 +229,7 @@ fn main() {
         }
     });
     // Keep window-owned controls alive for the duration of the event loop.
-    let _controls=(heading,labels,secret_labels,note,status,save,close,enable,autostart,state,form_window);
+    let _controls=(heading,labels,secret_labels,note,status,save,close,enable,autostart,state);
     nwg::dispatch_thread_events();
 }
 #[cfg(not(windows))]
