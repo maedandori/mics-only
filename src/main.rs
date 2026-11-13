@@ -208,14 +208,18 @@ fn run(c: Config) -> Result<(), String> {
         let valid_url=url::Url::parse(&c.coordinator_url).ok()
             .is_some_and(|u|u.scheme()=="https"&&u.host_str().is_some()
                 &&u.username()==""&&u.password().is_none());
+        let mut last_mirror=std::time::Instant::now()-Duration::from_secs(301);
         loop {
             if valid_url&&!presence_secret.is_empty(){let _=presence(&c,&presence_secret);}
-            if valid_url&&!mirror_secret.is_empty(){
-                if let Err(e)=mirror::refresh(&c,&mirror_secret,&local){
-                    eprintln!("MIRROR_ONLY_CACHE_ERROR {e}");
+            if last_mirror.elapsed()>=Duration::from_secs(300) {
+                last_mirror=std::time::Instant::now();
+                if valid_url&&!mirror_secret.is_empty(){
+                    if let Err(e)=mirror::refresh(&c,&mirror_secret,&local){
+                        eprintln!("MIRROR_ONLY_CACHE_ERROR {e}");
+                    }
                 }
             }
-            thread::sleep(Duration::from_secs(300))
+            thread::sleep(Duration::from_secs(60))
         }
     }
     // Read secrets once; never print secrets or raw employee/snapshot data.
