@@ -120,3 +120,13 @@ A remote update request is queued in Cloudflare D1, returned on the normal 60-se
 Note: Earlier v0.2.4 and older versions do not support remote commands. Upgrade those once using the local Settings GitHub Update button; subsequent releases can be requested from Admin.
 
 Admin remote update diagnostics: a failed Windows health check writes data/update-blocked-version.txt. The next /presence heartbeat reports that version; the Admin request transitions to failed rather than remaining pending. Examine data/update.log and wait for a corrected Release before retrying.
+
+## Vue 3 Local Web (v0.2.6)
+
+The three local tabs (ダッシュボード, 予定, 全て) now use Vue 3/Vite. The browser still requests the local Rust endpoints `/api/machines`, `/api/schedule`, and `/api/status` every 3 seconds and does not communicate with Cloudflare directly. The local Rust server stays restricted to 127.0.0.1:8787.
+
+GitHub Actions builds Vue using Node.js and includes the prebuilt `www/vue-v0.2.6/` folder in the Windows portable ZIP. Windows clients need no Node.js or npm. The Rust server prefers the versioned Vue index and serves its restricted asset paths. This layout is compatible with the previous updater, which preserves old `www` files but copies new version directories. If the Vue bundle is missing, the legacy static UI remains available.
+
+The v0.2.6 update helper copies the new version's Vue bundle before starting the agent, checks local API health and version, and restores the prior EXEs if startup fails. Existing `mics.ini`, encrypted DPAPI tokens, `data/`, and legacy custom `www` files are untouched. Vue files are only updated through new Release versions.
+
+Frontend development: `cd local-vue && npm install && npm run build`. The generated output is `www/vue-v0.2.6/`. The Windows Release workflow performs this automatically.
