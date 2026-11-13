@@ -25,6 +25,7 @@ pub fn current_shift_key() -> String {
     format!("{:04}-{:02}-{:02}-{}",work_date.year(),work_date.month(),work_date.day(),if night{"night"}else{"day"})
 }
 impl ShiftDefects {
+    pub fn needs_new_shift(&self)->bool {self.shift_key != current_shift_key()}
     pub fn load(path:&Path)->Self {
         fs::read(path).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or_default()
     }
@@ -61,7 +62,7 @@ impl ShiftDefects {
                 entry.last_total=total;
             }
             m["qty_ng_shift"]=Value::from(entry.shift_total);
-            m["qty_ng_shift_status"]=Value::String("observed".into());
+            m["qty_ng_shift_status"]=Value::String("observed_from_first_sample".into());
             m["qty_ng_shift_key"]=Value::String(key.clone());
         }
         let bytes=serde_json::to_vec(self).map_err(|e|e.to_string())?;
