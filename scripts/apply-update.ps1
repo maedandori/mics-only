@@ -73,6 +73,8 @@ try {
     }catch{}
   }
   if(!$healthy){throw 'New agent health/version check failed'}
+  $page=Invoke-WebRequest -Uri 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 4
+  if($page.StatusCode -ne 200 -or $page.Content -notlike ('*'+$vueName+'/*')){throw 'Vue local web health check failed'}
   Remove-Item -LiteralPath (Join-Path $Target 'data\update-blocked-version.txt') -Force -ErrorAction SilentlyContinue
   Log "UPDATE_SUCCESS $Version"
   # Keep backup until next successful update, for emergency manual recovery.
