@@ -65,7 +65,7 @@ function drawAll(){
    const list=entries.length?entries.map((r,i)=>{
      const change=classify(entries[i-1],r);
      const tag=change==="mold"?"型替え":change==="color"?"色替え":"";
-     return `<tr>
+     return `<tr class="all-schedule-row" tabindex="0" role="button" aria-expanded="false" aria-label="予定の詳細を開く" data-detail-id="${n}-${i}">
       <td class="when">${esc(r.start_at||"—")}</td>
       <td class="when">${esc(r.end_at||"—")}</td>
       <td>${esc(r.mold_name||"—")}<div class="product">${esc(r.mold_no||"")}</div></td>
@@ -73,7 +73,7 @@ function drawAll(){
       <td>${esc(r.color||"—")}</td>
       <td>${esc(r.order_no||"—")}</td>
       <td>${tag?`<span class="tag ${change}">${tag}</span>`:"—"}</td>
-     </tr>`;
+     </tr><tr class="all-schedule-detail" data-detail-for="${n}-${i}" hidden><td colspan="7"><dl class="all-row-fields">${Object.entries(r).map(([key,value])=>`<dt>${esc(key)}</dt><dd>${esc(value!==null&&typeof value==="object"?JSON.stringify(value):value??"—")}</dd>`).join("")}</dl></td></tr>`;
    }).join(""):"";
    return `<article class="all-card machine-schedule"><header>
      <b class="machine-number">${n}号機</b>
@@ -87,6 +87,22 @@ function drawAll(){
    ${details}</article>`;
  }).join("");
 }
+$("all-machines").addEventListener("click",event=>{
+ const row=event.target.closest("tr.all-schedule-row");
+ if(!row||!$("all-machines").contains(row))return;
+ const detail=Array.from(row.parentElement.children).find(r=>r.dataset.detailFor===row.dataset.detailId);
+ if(!detail)return;
+ detail.hidden=!detail.hidden;
+ row.setAttribute("aria-expanded",String(!detail.hidden));
+ row.setAttribute("aria-label",detail.hidden?"予定の詳細を開く":"予定の詳細を閉じる");
+ row.classList.toggle("expanded",!detail.hidden);
+});
+$("all-machines").addEventListener("keydown",event=>{
+ if(event.key!=="Enter"&&event.key!==" ")return;
+ const row=event.target.closest("tr.all-schedule-row");
+ if(!row||event.target!==row)return;
+ event.preventDefault();row.click();
+});
 const monday=(offset)=>{const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-(d.getDay()+6)%7+offset*7);return d};
 const parseDate=x=>new Date(String(x||"").replace(" ","T")+"+09:00");
 function classify(prev,cur){
