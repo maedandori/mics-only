@@ -357,3 +357,45 @@
  .node .node-top .machine-status-top{font-size:10px}
  .node .node-top .staff{font-size:12px!important}
 }
+
+/* Dense cards: each node uses its own content height instead of stretching to
+   the tallest card in its grid row. Long operator names consume space leftward. */
+.machines{align-items:start!important;grid-auto-rows:max-content;row-gap:8px;column-gap:8px}
+.node{
+ align-self:start!important;height:auto!important;min-height:0!important;
+ padding:7px 9px 20px!important;
+}
+.node .node-top{
+ grid-template-columns:max-content minmax(42px,1fr) fit-content(58%)!important;
+ column-gap:4px!important;min-height:0!important;
+ align-items:center;
+}
+.node .node-top .machine-number{font-size:18px;line-height:1.12}
+.node .node-top .machine-status-top{min-width:0;font-size:10px}
+.node .node-top .staff{
+ width:max-content;max-width:100%;justify-self:end;
+ font-size:13px!important;font-weight:900!important;
+ line-height:1.15;text-align:right;overflow-wrap:anywhere;
+}
+.node .mold{margin-top:2px;line-height:1.2}
+.node .mold-code{margin-top:1px;line-height:1.2}
+.node .product{margin-top:2px;line-height:1.2}
+.node .main-metrics{margin-top:3px;min-height:64px;grid-template-columns:minmax(0,1fr) 65px}
+.node .progress{width:64px;height:64px}
+.node .progress svg{width:64px;height:64px}
+.node .progress b{font-size:14px}
+.node .progress small{top:45px;font-size:7px}
+.node .quantities{margin-top:4px}
+.node .quantities>div{padding:3px 1px}
+.node .quantities dd{margin-top:1px}
+.node .next-change{margin-top:4px;padding:3px 5px}
+@media(max-width:800px){
+ .node{padding:7px 7px 20px!important}
+ .node .node-top{grid-template-columns:max-content minmax(35px,1fr) fit-content(58%)!important}
+ .node .node-top .staff{font-size:12px!important}
+ .node .main-metrics{min-height:60px;grid-template-columns:minmax(0,1fr) 60px}
+ .node .progress{width:59px;height:59px}
+ .node .progress svg{width:59px;height:59px}
+ .node .progress b{font-size:13px}
+ .node .progress small{top:42px}
+}
