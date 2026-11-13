@@ -22,7 +22,7 @@ fn main() {
             if let Some((k,v))=line.split_once('=') {original.insert(k.trim().to_lowercase(),v.trim().into());}
         }
     }
-    let defaults = [
+    let _defaults = [
         ("enabled","0"), ("agent_id","mics-backup-01"),
         ("host",""),("port","3050"),("database",""),("user","READONLY"),
         ("coordinator_url",""),("interval_seconds","30")
