@@ -12,8 +12,12 @@ function drawDashboard(){
  }).join("");
 }
 const dataFields=[["machine_no","機械番号"],["status_code","ステータス"],["mold_name","金型名"],["mold_no","金型番号"],["order_no","製造番号"],["product_name","品名"],["qty_plan","予定数"],["qty_ok","良品数"],["qty_ng","不良数"],["qty_remaining","残数"],["cycle_seconds","実績サイクル"],["pick_qty","取り数"],["staff_name","担当者"],["scheduled_end_at","完了予定"]];
+let lastAllSignature="";
 function drawAll(){
  // ALL shows every stored schedule row per machine, across all available dates.
+ const signature=JSON.stringify({machines:current.machines,rows:schedule.rows,from:schedule.from,to:schedule.to});
+ if(signature===lastAllSignature)return;
+ lastAllSignature=signature;
  // The current machine snapshot is kept in a collapsible secondary section.
  const snapshotMap=new Map((current.machines||[]).map(m=>[Number(m.machine_no),m]));
  const rows=Array.isArray(schedule.rows)?schedule.rows:[];
