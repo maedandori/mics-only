@@ -230,7 +230,7 @@ fn main() {
             }
             if handle==update_agent.handle {
                 match github_update(&agent_exe) {
-                    Ok(result)=>{nwg::simple_message("GitHub Update",&result);if result.starts_with("Portable ZIP "){nwg::stop_thread_dispatch();}},
+                    Ok(result)=>{nwg::simple_message("GitHub Update",&result);if result.starts_with("UPDATE_STAGED "){nwg::stop_thread_dispatch();}},
                     Err(e)=>{nwg::error_message("GitHub Update",&e);}
                 }
                 return
