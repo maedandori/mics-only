@@ -18,11 +18,13 @@ const machineMap=computed(()=>new Map((current.value.machines||[]).map(m=>[Numbe
 const machineCards=computed(()=>order.map(n=>{
  const m=machineMap.value.get(n)||{}
  const planned=Math.max(0,Number(m.qty_plan)||0),good=Math.max(0,Number(m.qty_ok)||0)
- const bad=Math.max(0,Number(m.qty_ng)||0)
+ const totalBad=Math.max(0,Number(m.qty_ng)||0)
+ const shiftAvailable=m.qty_ng_shift_status==='observed_from_first_sample'&&Number.isFinite(Number(m.qty_ng_shift))
+ const bad=shiftAvailable?Math.max(0,Number(m.qty_ng_shift)):null
  const remaining=Math.max(0,m.qty_remaining!=null&&Number.isFinite(Number(m.qty_remaining))?Number(m.qty_remaining):planned-good)
- return {n,m,has:machineMap.value.has(n),planned,good,bad,remaining,pct:planned?Math.max(0,Math.min(100,good/planned*100)):0,pred:prediction(m)}
+ return {n,m,has:machineMap.value.has(n),planned,good,bad,totalBad,remaining,pct:planned?Math.max(0,Math.min(100,good/planned*100)):0,pred:prediction(m)}
 }))
-const warnings=computed(()=>machineCards.value.filter(c=>c.bad>20))
+const warnings=computed(()=>machineCards.value.filter(c=>c.bad!==null&&c.bad>20))
 const running=computed(()=>machineCards.value.filter(c=>status(c.m)==='running').length)
 const stopped=computed(()=>machineCards.value.filter(c=>status(c.m)==='danger').length)
 function classify(prev,cur){
@@ -81,7 +83,7 @@ function rowsFor(n,all=false){
   return a<weekEnd.value&&b>=weekStart.value&&(filter.value==='all'||r.change===filter.value)
  })
 }
-const dataFields=[['machine_no','機械番号'],['status_code','ステータス'],['mold_name','金型名'],['mold_no','金型番号'],['order_no','製造番号'],['product_name','品名'],['qty_plan','予定数'],['qty_ok','良品数'],['qty_ng','不良数'],['qty_remaining','残数'],['cycle_seconds','サイクル'],['pick_qty','取り数'],['staff_name','担当者'],['scheduled_end_at','完了予定']]
+const dataFields=[['machine_no','機械番号'],['status_code','ステータス'],['mold_name','金型名'],['mold_no','金型番号'],['order_no','製造番号'],['product_name','品名'],['qty_plan','予定数'],['qty_ok','良品数'],['qty_ng_shift','当シフト不良数'],['qty_ng','累計不良数'],['qty_remaining','残数'],['cycle_seconds','サイクル'],['pick_qty','取り数'],['staff_name','担当者'],['scheduled_end_at','完了予定']]
 function allFields(m){const keys=new Set(dataFields.map(([k])=>k));return [...dataFields,...Object.keys(m||{}).filter(k=>!keys.has(k)).map(k=>[k,k])]}
 const fmt=v=>v==null?'—':typeof v==='object'?JSON.stringify(v):String(v)
 function toggleRow(key){openRows.value={...openRows.value,[key]:!openRows.value[key]}}
@@ -134,7 +136,7 @@ onUnmounted(()=>{clearInterval(timer);document.removeEventListener('fullscreench
    <button type="button" class="fullscreen-toggle" @click="toggleFullscreen">{{fullscreen?'⤢ 全画面終了':'⛶ 全画面'}}</button>
   </div></div>
   <div v-if="warnings.length" class="ng-alerts" role="status" aria-live="polite">
-   <div v-for="c in warnings" :key="c.n" class="ng-warning-line"><strong>{{c.n}}号機：不良数 {{num(c.bad)}}個</strong><span>不良数が20個を超えています。現場で不良原因を確認してください。</span></div>
+   <div v-for="c in warnings" :key="c.n" class="ng-warning-line"><strong>{{c.n}}号機：不良数 {{num(c.bad)}}個</strong><span>今シフトの不良数が20個を超えています。現場で不良原因を確認してください。</span></div>
   </div>
   <section v-if="view==='dashboard'" class="view"><div class="machines">
    <article v-for="c in machineCards" :key="c.n" class="node" :class="status(c.m)">
@@ -151,7 +153,7 @@ onUnmounted(()=>{clearInterval(timer);document.removeEventListener('fullscreench
     <dl class="quantities">
      <div><dt>予定数</dt><dd>{{num(c.planned)}}</dd></div>
      <div><dt>良品数</dt><dd>{{num(c.good)}}</dd></div>
-     <div><dt>不良数</dt><dd :class="{'ng-fire':c.bad>5}"><span :class="{'ng-value':c.bad>5}" :data-flame-number="c.bad>5?num(c.bad):undefined">{{num(c.bad)}}</span></dd></div>
+     <div><dt>不良数（今シフト）</dt><dd :class="{'ng-fire':c.bad!==null&&c.bad>5}"><span :class="{'ng-value':c.bad!==null&&c.bad>5}" :data-flame-number="c.bad!==null&&c.bad>5?num(c.bad):undefined">{{c.bad===null?'—':num(c.bad)}}</span></dd><small class="ng-total">累計: {{num(c.totalBad)}}</small></div>
      <div><dt>残数</dt><dd>{{num(c.remaining)}}</dd></div>
     </dl>
     <div class="next-change" :class="c.pred.type||'unknown'"><span>次の変更: <strong>{{c.pred.label}}</strong></span><span>変更予測: <strong>{{c.pred.text}}</strong></span></div>
@@ -188,7 +190,7 @@ onUnmounted(()=>{clearInterval(timer);document.removeEventListener('fullscreench
   <footer class="page-footer" aria-label="生産サマリー">
    <section class="summary"><div class="stat"><span>機械</span><b>14</b></div><div class="stat"><span>稼働中</span><b>{{running}}</b></div><div class="stat"><span>停止 / 異常</span><b>{{stopped}}</b></div><div class="stat"><span>通信</span><b>{{connected?'LOCAL OK':'OFFLINE'}}</b></div><div class="stat server"><b>{{server.mode||'UNKNOWN'}}</b><span>{{current.sampled_at?'更新: '+new Date(current.sampled_at).toLocaleString('ja-JP'):'保存データなし'}}</span></div></section>
    <div class="footer-settings"><div class="size-dock"><label for="node-size">ノードサイズ</label><span>小</span><input id="node-size" type="range" min="220" max="520" step="10" :value="nodeWidth" @input="saveWidth($event.target.value)"><span>大</span><output>{{nodeWidth}}px</output></div></div>
-   <small class="footer-note">127.0.0.1:8787 · ローカル専用 · Vue 3</small>
+   <small class="footer-note">不良数は07:30・19:00 JSTからの観測増分。初回観測前の不良数は含みません。 · ローカル専用 · Vue 3</small>
   </footer>
  </main>
 </div>
