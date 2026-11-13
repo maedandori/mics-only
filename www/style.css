@@ -234,3 +234,49 @@
  .ng-alerts{top:64px;right:9px;width:min(310px,calc(100vw - 18px))}
 }
 @media(prefers-reduced-motion:reduce){.ng-warning-line{animation:none}}
+
+/* Compact production node: remove unused vertical whitespace while preserving
+   actual-cycle ETA and readable NG flame animation. */
+.machines{gap:9px;align-items:stretch}
+.node{
+ min-height:0!important;padding:9px 11px 23px!important;
+ display:flex;flex-direction:column;gap:0;
+ border-radius:12px
+}
+.node .node-top{margin:0;min-height:25px}
+.node .machine-number{font-size:19px;line-height:1.18}
+.node .staff{font-size:10px}
+.node .mold{margin-top:3px;font-size:13px;line-height:1.27;min-height:0}
+.node .mold-code{margin-top:2px;font-size:10px;line-height:1.25}
+.node .product{margin-top:3px;min-height:0;font-size:10px;line-height:1.35}
+.node .main-metrics{grid-template-columns:minmax(0,1fr) 77px;gap:4px;margin-top:5px;min-height:78px}
+.node .cycle{font-size:12px}.node .cycle strong{font-size:14px}
+.node .pick{margin-top:2px;font-size:10px}
+.node .progress{width:76px;height:76px}
+.node .progress svg{width:76px;height:76px}
+.node .progress b{font-size:16px}
+.node .progress small{top:53px;font-size:8px}
+.node .quantities{margin:6px 0 0;gap:3px}
+.node .quantities>div{padding:4px 1px;border-radius:7px}
+.node .quantities dt{font-size:9px;line-height:1.2}
+.node .quantities dd{font-size:13px;margin:2px 0 0;line-height:1.3}
+.node .next-change{
+ display:flex;justify-content:space-between;align-items:center;
+ flex-wrap:wrap;gap:2px 8px;margin-top:6px;
+ padding:4px 6px;border-radius:7px;background:#ffffff9c;
+ border:1px solid #ffffffb8;
+ font-size:10px;line-height:1.3;color:#415876
+}
+.node .next-change strong{font-size:11px;color:#bf3340;font-weight:850;white-space:nowrap}
+.node .next-change.unknown strong{color:#738298}
+.node .status{bottom:5px;font-size:10px;line-height:1.3}
+.node .status-code{bottom:5px;font-size:9px}
+@media(max-width:800px){
+ .node{padding:8px 9px 23px!important}
+ .node .main-metrics{grid-template-columns:minmax(0,1fr) 70px;min-height:72px}
+ .node .progress{width:68px;height:68px}
+ .node .progress svg{width:68px;height:68px}
+ .node .progress b{font-size:15px}
+ .node .progress small{top:48px;font-size:8px}
+ .node .quantities dd{font-size:12px}
+}
