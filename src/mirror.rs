@@ -1,6 +1,6 @@
 //! Read-only Cloudflare mirror; never connects Firebird while standby.
 use serde_json::{json,Value};
-use std::{fs,time::Duration};
+use std::fs;
 pub fn refresh(c:&super::Config,token:&str,local:&super::local_web::LocalState)->Result<(),String>{
     if token.is_empty(){return Err("Mirror credentials unavailable".into())}
     let url=format!("{}/cache",c.coordinator_url.trim_end_matches('/'));
@@ -42,7 +42,7 @@ pub fn refresh(c:&super::Config,token:&str,local:&super::local_web::LocalState)-
         fs::rename(&path,&backup).map_err(|e|e.to_string())?;
     }
     if let Err(e)=fs::rename(&tmp,&path){
-        if backup.exists(){let _=fs::rename(&backup,&path)}
+        if backup.exists(){let _=fs::rename(&backup,&path);}
         return Err(e.to_string())
     }
     Ok(())
