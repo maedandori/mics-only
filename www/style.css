@@ -130,3 +130,8 @@
  .page-bottom-controls{margin-top:16px}
  .page-bottom-controls .size-dock{padding:11px 8px}
 }
+
+/* Separate setup/orange from cycle-warning/yellow. */
+.node.setup{background:#ffe6cd;border-color:#e9ab71;border-top-color:#df7e25}
+.node.setup .status{color:#a85816}
+.node.setup .progress .arc{stroke:#dc7f2b}
