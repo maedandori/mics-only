@@ -99,3 +99,14 @@ The **全て** tab now shows **every row currently available** in `data/schedule
 **Scope:** "all" means all rows currently saved in the local JSON, **not** the entire lifetime of the remote Firebird database. ACTIVE currently fetches up to 30 days; MIRROR_ONLY/STANDBY reflects the available Cloudflare schedule mirror (normally 14 days). The app does not delete or change any Firebird schedule.
 
 The web is served from editable `www/` next to the executable. To update only this UI, copy the newest `www/index.html`, `www/app.js`, `www/style.css`, and `www/sw.js` beside the installed EXEs and refresh the browser; an EXE rebuild is not required. The portable updater intentionally preserves existing local WWW files, so installing a new ZIP by itself may not replace an older UI.
+
+## Automatic updates and rollback (v0.2.4)
+
+- Every running mics-only.exe checks the latest stable GitHub Release after an initial 5-minute delay, then every 6 hours. Nothing is installed when the coordinator state is ACTIVE. Failed network checks are non-fatal.
+- The Settings "GitHub Update" button uses the same verified downloader. Existing v0.2.2/v0.2.3 installations still require one manual update; automatic checks begin only after v0.2.4 is installed.
+- Only a newer semantic version with a GitHub Release portable ZIP is applied. The ZIP download is checked against the GitHub asset size and SHA-256 asset digest when provided.
+- A standalone PowerShell helper waits for the invoking process to close, extracts and validates the ZIP, saves BOTH old EXEs in data/update-backup, replaces both EXEs, restarts the agent and probes the local /api/status endpoint for up to 50 seconds. The health response must identify the exact new version.
+- If extraction, replacement, startup, or health verification fails after replacement begins, both EXEs are restored and the old agent is restarted. Progress and failures are recorded in data/update.log.
+- mics.ini, %LOCALAPPDATA%/MICS-Only/credentials.dpapi, data snapshots and existing www files are retained without overwrites. No print agent is updated or stopped.
+- Auto-update is not a substitute for coordinator lease fencing. Do not run two installations with the same agent_id, especially when enabled for standby failover.
+- If the installation folder is not writable or PowerShell is blocked by Windows policy, the update is not applied. The last known working EXEs are kept at data/update-backup after success for manual recovery.
