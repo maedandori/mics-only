@@ -4,6 +4,28 @@ const $=id=>document.getElementById(id), esc=x=>String(x??"").replace(/[&<>"']/g
 let current={machines:[]},schedule={rows:[]},week=0,filter="all",view="dashboard";
 function status(code,name=""){const s=String(code??"").trim(),t=String(name??"");if(["410","440","490","300","0"].includes(s)||/停止|異常|クレーム/.test(t))return "danger";if(s==="100"||/段取り/.test(t))return "setup";if(s==="210"||/注意/.test(t))return "warning";if(s==="200"||/稼働中/.test(t))return "running";return ""}
 function num(n){return(Number(n)||0).toLocaleString("ja-JP")}
+// Subtle production warning: show one Japanese notice per machine with >20 defects.
+let lastNgAlertSignature="";
+function updateNgWarnings(machines){
+ const exceeded=machines.filter(m=>Number(m.qty_ng)>20&&Number.isFinite(Number(m.machine_no)))
+  .sort((a,b)=>Number(a.machine_no)-Number(b.machine_no));
+ const signature=exceeded.map(m=>String(m.machine_no)+":"+String(m.qty_ng)).join("|");
+ if(signature===lastNgAlertSignature)return;
+ lastNgAlertSignature=signature;
+ const host=$("ng-alerts");
+ host.replaceChildren();
+ host.hidden=exceeded.length===0;
+ for(const m of exceeded){
+  const line=document.createElement("div");
+  line.className="ng-warning-line";
+  const strong=document.createElement("strong");
+  strong.textContent=String(m.machine_no)+"号機：不良数 "+num(m.qty_ng)+"個";
+  const hint=document.createElement("span");
+  hint.textContent="不良数が20個を超えています。現場で不良原因を確認してください。";
+  line.append(strong,hint);
+  host.append(line);
+ }
+}
 function drawDashboard(){
  const map=new Map((current.machines||[]).map(m=>[Number(m.machine_no),m]));
  const format=v=>(Number(v)||0).toLocaleString("ja-JP");
@@ -138,6 +160,7 @@ async function refresh(){
  const [a,b,c]=await Promise.all([fetch("/api/machines",{cache:"no-store"}),fetch("/api/status",{cache:"no-store"}),fetch("/api/schedule",{cache:"no-store"})]);
  if(!a.ok||!b.ok)throw Error("Local API unavailable");
  current=await a.json();const stat=await b.json();
+ updateNgWarnings(Array.isArray(current.machines)?current.machines:[]);
  if(c.ok)schedule=await c.json();
  $("total").textContent=order.length;$("running").textContent=(current.machines||[]).filter(m=>status(m.status_code)==="running").length;
  $("stopped").textContent=(current.machines||[]).filter(m=>status(m.status_code)==="danger").length;
@@ -167,4 +190,26 @@ setNodeSize(safeRead("mics-only:node-width","300"));
 setSidebar(safeRead("mics-only:menu-collapsed",window.innerWidth<=800?"1":"0")==="1");
 $("node-size").addEventListener("input",e=>setNodeSize(e.target.value));
 $("menu-toggle").addEventListener("click",()=>setSidebar(!$("app-shell").classList.contains("menu-collapsed")));
+const fullButton=$("fullscreen-toggle");
+function updateFullscreenButton(){
+ const full=!!document.fullscreenElement;
+ fullButton.textContent=full?"⤢ 全画面終了":"⛶ 全画面";
+ fullButton.setAttribute("aria-label",full?"全画面表示を終了":"全画面表示に切り替え");
+}
+fullButton.addEventListener("click",async()=>{
+ try{
+  if(document.fullscreenElement){
+   await document.exitFullscreen();
+  }else{
+   if(!document.documentElement.requestFullscreen)throw Error("未対応のブラウザです");
+   await document.documentElement.requestFullscreen();
+  }
+ }catch(error){
+  // Fullscreen requires a user gesture; show a brief explanation if browser denies it.
+  fullButton.title="全画面の切り替えができません: "+String(error.message||error);
+ }
+ updateFullscreenButton();
+});
+document.addEventListener("fullscreenchange",updateFullscreenButton);
+updateFullscreenButton();
 refresh();setInterval(refresh,3000);if("serviceWorker"in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>{});
