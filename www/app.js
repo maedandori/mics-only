@@ -83,7 +83,7 @@ function drawDashboard(){
    '<b>'+pct.toFixed(0)+'%</b><small>生産進捗</small></div></div>'+
    '<dl class="quantities">'+cell("予定数",planned)+cell("良品数",good)+cell("不良数",bad,bad>5)+cell("残数",remaining)+'</dl>'+
    '<div class="next-change '+(prediction.type||"unknown")+'"><span>次の変更: <strong>'+(prediction.label||"—")+'</strong></span><span>変更予測: <strong>'+esc(prediction.text)+'</strong></span></div>'+
-   '<span class="status">'+esc(statusLabel)+'</span><span class="status-code">'+esc(m.status_code??"")+'</span></article>';
+   '</article>';
  }).join("");
 }
 const dataFields=[["machine_no","機械番号"],["status_code","ステータス"],["mold_name","金型名"],["mold_no","金型番号"],["order_no","製造番号"],["product_name","品名"],["qty_plan","予定数"],["qty_ok","良品数"],["qty_ng","不良数"],["qty_remaining","残数"],["cycle_seconds","サイクル"],["pick_qty","取り数"],["staff_name","担当者"],["scheduled_end_at","完了予定"]];
@@ -183,7 +183,7 @@ function drawSchedule(){
  return `<article class="schedule-card"><header><strong>${n}号機</strong><span class="muted">${entries.length} 件</span></header>${entries.length?entries.map(r=>`<div class="schedule-entry"><div class="entry-time">${esc(r.start_at)} → ${esc(r.end_at||"—")}</div><div class="entry-name">${esc(r.mold_name||r.mold_no||"—")}</div><div class="product">${esc(r.product_name||"")}　${esc(r.color||"")}</div>${["color","mold"].includes(r.change)?`<span class="tag ${r.change}">${r.change==="color"?"色替え":"型替え"}</span>`:""}</div>`).join(""):'<div class="empty">この週の保存予定なし</div>'}</article>`;
  }).join("");
 }
-function show(viewName){view=viewName;for(const v of ["dashboard","schedule","all"])$(v+"-view").hidden=v!==viewName;document.querySelectorAll(".nav").forEach(b=>b.classList.toggle("active",b.dataset.view===viewName));$("page-title").textContent={dashboard:"ダッシュボード",schedule:"予定",all:"全て"}[viewName];if(viewName==="schedule")drawSchedule();if(viewName==="all")drawAll()}
+function show(viewName){view=viewName;for(const v of ["dashboard","schedule","all"])$(v+"-view").hidden=v!==viewName;document.querySelectorAll(".nav").forEach(b=>b.classList.toggle("active",b.dataset.view===viewName));if(viewName==="schedule")drawSchedule();if(viewName==="all")drawAll()}
 document.querySelectorAll(".nav").forEach(b=>b.onclick=()=>show(b.dataset.view));
 document.querySelectorAll(".top-command-nav .nav").forEach(b=>b.addEventListener("click",()=>setSidebar(true)));
 $("current-week").onclick=()=>{week=0;weekButtons();drawSchedule()};
