@@ -15,7 +15,7 @@ const dataFields=[["machine_no","機械番号"],["status_code","ステータス"
 function drawAll(){
  const map=new Map((current.machines||[]).map(m=>[+m.machine_no,m]));
  $("all-machines").innerHTML=order.map(n=>{
- const m=map.get(n);return `<article class="all-card"><header><b class="machine-number">#${n}</b><span class="status">${m?esc(names[m.status_code]||m.status_code||"不明"):"データなし"}</span></header>${m?`<dl>${dataFields.map(([key,label])=>`<dt>${label}</dt><dd>${esc(m[key]??"—")}</dd>`).join("")}</dl>`:'<div class="empty">保存データなし</div>'}</article>`;
+ const m=map.get(n);return `<article class="all-card"><header><b class="machine-number">#${n}</b><span class="status">${m?esc(names[m.status_code]||m.status_code||"不明"):"データなし"}</span></header>${m?`<dl>${[...dataFields,...Object.keys(m).filter(key=>!dataFields.some(([known])=>known===key)).map(key=>[key,key])].map(([key,label])=>`<dt>${esc(label)}</dt><dd>${esc(typeof m[key]==="object"?JSON.stringify(m[key]):m[key]??"—")}</dd>`).join("")}</dl>`:'<div class="empty">保存データなし</div>'}</article>`;
  }).join("");
 }
 const monday=(offset)=>{const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-(d.getDay()+6)%7+offset*7);return d};
