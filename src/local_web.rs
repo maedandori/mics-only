@@ -1,0 +1,111 @@
+//! Loopback-only HTTP server. Never bind to a LAN/public interface.
+use serde_json::{json, Value};
+use std::{fs, io::{Read,Write}, net::{TcpListener,TcpStream}, path::{Path,PathBuf}, sync::{Arc,Mutex}, thread, time::Duration};
+
+#[derive(Clone)]
+pub struct LocalState {
+    pub snapshot: Arc<Mutex<Value>>,
+    pub mode: Arc<Mutex<String>>,
+    pub data_path: PathBuf,
+}
+impl LocalState {
+    pub fn new(data_path:PathBuf)->Self {
+        let initial=fs::read(&data_path).ok()
+            .and_then(|raw|serde_json::from_slice::<Value>(&raw).ok())
+            .filter(|v|v.get("machines").and_then(Value::as_array).is_some())
+            .unwrap_or_else(||json!({"source":"mics-only","machines":[],"sampled_at":null}));
+        Self{snapshot:Arc::new(Mutex::new(initial)),mode:Arc::new(Mutex::new("STANDBY".into())),data_path}
+    }
+    pub fn set_mode(&self,mode:&str) {
+        if let Ok(mut m)=self.mode.lock(){*m=mode.to_owned()}
+    }
+    pub fn update(&self,mut data:Value)->Result<(),String>{
+        if data.get("machines").and_then(Value::as_array).is_none_or(|a|a.is_empty()){
+            return Err("Refusing empty snapshot".into())
+        }
+        data["source"]=json!("mics-only");
+        let bytes=serde_json::to_vec_pretty(&data).map_err(|e|e.to_string())?;
+        if let Some(parent)=self.data_path.parent(){fs::create_dir_all(parent).map_err(|e|e.to_string())?}
+        let tmp=self.data_path.with_extension("json.tmp");
+        fs::write(&tmp,bytes).map_err(|e|e.to_string())?;
+        // Windows cannot replace an existing destination using fs::rename directly.
+        // Move old snapshot aside first, restoring it if the replacement fails.
+        let backup=self.data_path.with_extension("json.bak");
+        if self.data_path.exists(){
+            let _=fs::remove_file(&backup);
+            fs::rename(&self.data_path,&backup).map_err(|e|e.to_string())?;
+        }
+        if let Err(e)=fs::rename(&tmp,&self.data_path){
+            if backup.exists(){let _=fs::rename(&backup,&self.data_path);}
+            return Err(e.to_string())
+        }
+        if let Ok(mut v)=self.snapshot.lock(){*v=data}
+        Ok(())
+    }
+}
+fn reply(stream:&mut TcpStream,status:&str,kind:&str,body:&[u8],cache:&str){
+    let headers=format!("HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: {cache}\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nContent-Security-Policy: default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'\r\nConnection: close\r\n\r\n",body.len());
+    let _=stream.write_all(headers.as_bytes());let _=stream.write_all(body);
+}
+fn serve(mut stream:TcpStream,state:&LocalState) {
+    let _=stream.set_read_timeout(Some(Duration::from_secs(3)));
+    let _=stream.set_write_timeout(Some(Duration::from_secs(3)));
+    let mut buf=[0u8;8192];
+    let Ok(n)=stream.read(&mut buf) else{return};
+    let req=String::from_utf8_lossy(&buf[..n]);
+    let first=req.lines().next().unwrap_or("");
+    let mut fields=first.split_ascii_whitespace();
+    let method=fields.next().unwrap_or("");
+    let path=fields.next().unwrap_or("");
+    if method!="GET"&&method!="HEAD" {
+        reply(&mut stream,"405 Method Not Allowed","text/plain",b"GET only","no-store");return
+    }
+    // Loopback binding protects network access. Host validation additionally
+    // prevents other websites from using DNS rebinding to read local production data.
+    let host=req.lines().find_map(|line|{
+        let (name,value)=line.split_once(':')?;
+        if name.eq_ignore_ascii_case("Host"){Some(value.trim().to_ascii_lowercase())}else{None}
+    }).unwrap_or_default();
+    if !matches!(host.as_str(),"127.0.0.1:8787"|"localhost:8787"|"[::1]:8787") {
+        reply(&mut stream,"403 Forbidden","text/plain",b"Localhost only","no-store");return
+    }
+    let snapshot=||state.snapshot.lock().map(|v|v.clone()).unwrap_or(json!({}));
+    let (status,kind,body,cache)=match path.split('?').next().unwrap_or("") {
+        "/"|"/index.html"=>("200 OK","text/html; charset=utf-8",include_bytes!("web/index.html").to_vec(),"no-cache"),
+        "/app.js"=>("200 OK","application/javascript; charset=utf-8",include_bytes!("web/app.js").to_vec(),"no-cache"),
+        "/style.css"=>("200 OK","text/css; charset=utf-8",include_bytes!("web/style.css").to_vec(),"no-cache"),
+        "/sw.js"=>("200 OK","application/javascript; charset=utf-8",include_bytes!("web/sw.js").to_vec(),"no-cache"),
+        "/manifest.webmanifest"=>("200 OK","application/manifest+json",include_bytes!("web/manifest.webmanifest").to_vec(),"no-cache"),
+        "/icon.svg"=>("200 OK","image/svg+xml",include_bytes!("web/icon.svg").to_vec(),"public, max-age=86400"),
+        "/api/machines"=>("200 OK","application/json; charset=utf-8",serde_json::to_vec(&snapshot()).unwrap_or_default(),"no-store"),
+        "/api/status"=>{
+            let mode=state.mode.lock().map(|s|s.clone()).unwrap_or("UNKNOWN".into());
+            let v=snapshot();
+            ("200 OK","application/json; charset=utf-8",serde_json::to_vec(&json!({
+                "ok":true,"mode":mode,"sampled_at":v.get("sampled_at"),"machine_count":v["machines"].as_array().map(|a|a.len()).unwrap_or(0),
+                "server":"127.0.0.1:8787"
+            })).unwrap_or_default(),"no-store")
+        }
+        _=>("404 Not Found","text/plain",b"Not Found".to_vec(),"no-store")
+    };
+    reply(&mut stream,status,kind,if method=="HEAD"{&[]}else{&body},cache);
+}
+pub fn start(state:LocalState)->Result<(),String>{
+    let listener=TcpListener::bind("127.0.0.1:8787").map_err(|e|format!("LOCAL_WEB_BIND_FAILED: {e}"))?;
+    thread::spawn(move ||{
+        println!("LOCAL_WEB_READY http://127.0.0.1:8787");
+        for client in listener.incoming(){
+            match client{
+                Ok(stream)=>serve(stream,&state),
+                Err(e)=>eprintln!("LOCAL_WEB_CLIENT_FAILED {e}")
+            }
+        }
+    });
+    Ok(())
+}
+pub fn default_snapshot_path()->PathBuf{
+    let base=std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+        .or_else(||std::env::current_exe().ok().and_then(|p|p.parent().map(Path::to_path_buf)))
+        .unwrap_or_else(||PathBuf::from("."));
+    base.join("MICS-Only").join("data").join("machines.json")
+}
