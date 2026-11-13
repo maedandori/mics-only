@@ -116,7 +116,7 @@ fn main() {
     }).parent(&window).position((25,621)).size((735,25)).build(&mut status).unwrap();
 
     let mut test=nwg::Button::default();
-    nwg::Button::builder().text("Test Connection / 接続テスト").parent(&window)
+    nwg::Button::builder().text("Test + Register D1 / 接続テスト").parent(&window)
         .position((25,658)).size((190,36)).build(&mut test).unwrap();
     let mut open_web=nwg::Button::default();
     nwg::Button::builder().text("Open Local Web").parent(&window)
@@ -187,15 +187,14 @@ fn main() {
                 return
             }
             if handle==test.handle {
-                // Checks only the saved INI configuration, TCP port and coordinator health.
-                // It never connects to the Firebird database, executes SQL or requests a lease.
+                // Checks saved INI, Firebird TCP and Coordinator; then registers\n                // this Agent ID in D1 via authenticated /presence. No Firebird SQL or lease.
                 let output=Command::new(&agent_exe).arg("--test-connection")
                     .creation_flags(0x08000000).output();
                 match output {
                     Ok(o)=>{
                         let stdout=String::from_utf8_lossy(&o.stdout);
                         let stderr=String::from_utf8_lossy(&o.stderr);
-                        let detail=format!("Saved configuration only. No SQL performed.\n{}\n{}",stdout,stderr);
+                        let detail=format!("Saved configuration only. No SQL or lease. D1 registration result below.\n{}\n{}",stdout,stderr);
                         if o.status.success(){nwg::simple_message("Connection Test", &detail);}
                         else{nwg::error_message("Connection Test FAILED", &detail);}
                     }
