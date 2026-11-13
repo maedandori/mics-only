@@ -23,6 +23,7 @@ Source: "..\target\release\mics-only.exe"; DestDir: "{app}"; Flags: ignoreversio
 Source: "..\target\release\mics-only-settings.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\mics.ini.example"; DestDir: "{app}"; DestName: "mics.ini"; Flags: onlyifdoesntexist
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\www\*"; DestDir: "{app}\www"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\MICS Only - Readme"; Filename: "{app}\README.md"
