@@ -5,13 +5,32 @@ let current={machines:[]},schedule={rows:[]},week=0,filter="all",view="dashboard
 function status(code){const s=String(code??"");return["410","440","490"].includes(s)?"danger":["100","210"].includes(s)?"warning":s==="200"?"running":""}
 function num(n){return(Number(n)||0).toLocaleString("ja-JP")}
 function drawDashboard(){
- const map=new Map((current.machines||[]).map(m=>[+m.machine_no,m]));
+ const map=new Map((current.machines||[]).map(m=>[Number(m.machine_no),m]));
+ const format=v=>(Number(v)||0).toLocaleString("ja-JP");
+ const cell=(name,value,flame=false)=>{
+  const text=format(value);
+  return '<div><dt>'+name+'</dt><dd class="'+(flame?'ng-fire':'')+'"><span class="'+(flame?'ng-value':'')+'"'+(flame?' data-flame-number="'+esc(text)+'"':'')+'>'+text+'</span></dd></div>';
+ };
  $("machines").innerHTML=order.map(n=>{
- const m=map.get(n)||{},has=map.has(n),planned=+m.qty_plan||0,good=+m.qty_ok||0,pct=planned?Math.min(100,100*good/planned):0;
- return `<article class="node ${status(m.status_code)}"><header><span class="machine-number">#${n}</span><span class="status">${has?esc(names[m.status_code]||m.status_code||"不明"):"データなし"}</span></header><div class="mold">${esc(m.mold_name||m.mold_no||"—")}</div><div class="product">${esc(m.product_name||"—")}</div><div class="bar"><div class="fill" style="width:${pct.toFixed(1)}%"></div></div><div class="numbers"><span>良品 <b>${num(good)}</b></span><span>予定 <b>${num(planned)}</b></span></div><div class="meta"><span>不良: ${num(m.qty_ng)}</span><span>${pct.toFixed(1)}%</span></div><div class="meta"><span>Cycle: ${esc(m.cycle_seconds??"—")}</span><span>取り数: ${esc(m.pick_qty??"—")}</span></div></article>`;
+  const m=map.get(n)||{},has=map.has(n),planned=Math.max(0,+m.qty_plan||0),good=Math.max(0,+m.qty_ok||0),bad=Math.max(0,+m.qty_ng||0);
+  const remaining=Math.max(0,Number.isFinite(Number(m.qty_remaining))&&m.qty_remaining!==null?+m.qty_remaining:planned-good);
+  const pct=planned?Math.max(0,Math.min(100,100*good/planned)):0;
+  const staff=m.staff_name||m.operator_name||"",cycle=m.cycle_seconds??"—",pick=m.pick_qty??"—";
+  const statusLabel=has?(names[m.status_code]||m.status_name||m.status_code||"不明"):"データなし";
+  return '<article class="node '+status(m.status_code)+'">'+
+   '<div class="node-top"><span class="machine-number">#'+n+'</span><span class="staff">'+(staff?'担当者: '+esc(staff):'')+'</span></div>'+
+   '<div class="mold">'+esc(m.mold_name||m.mold_no||"—")+'</div>'+
+   '<div class="mold-code">金型番号: '+esc(m.mold_no||"—")+'</div>'+
+   '<div class="product">'+esc(m.product_name||"—")+'</div>'+
+   '<div class="main-metrics"><div class="cycle">サイクル: <strong>'+esc(cycle)+'</strong><div class="pick">取り数: '+esc(pick)+'</div></div>'+
+   '<div class="progress" role="progressbar" aria-label="生産進捗" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+pct.toFixed(1)+'">'+
+   '<svg width="102" height="102" viewBox="0 0 102 102" aria-hidden="true"><circle class="track" cx="51" cy="51" r="42"/><circle class="arc" cx="51" cy="51" r="42" pathLength="100" stroke-dasharray="'+pct.toFixed(1)+' 100"/></svg>'+
+   '<b>'+pct.toFixed(0)+'%</b><small>生産進捗</small></div></div>'+
+   '<dl class="quantities">'+cell("予定数",planned)+cell("良品数",good)+cell("不良数",bad,bad>5)+cell("残数",remaining)+'</dl>'+
+   '<span class="status">'+esc(statusLabel)+'</span><span class="status-code">'+esc(m.status_code??"")+'</span></article>';
  }).join("");
 }
-const dataFields=[["machine_no","機械番号"],["status_code","ステータス"],["mold_name","金型名"],["mold_no","金型番号"],["order_no","製造番号"],["product_name","品名"],["qty_plan","予定数"],["qty_ok","良品数"],["qty_ng","不良数"],["qty_remaining","残数"],["cycle_seconds","実績サイクル"],["pick_qty","取り数"],["staff_name","担当者"],["scheduled_end_at","完了予定"]];
+const dataFields=[["machine_no","機械番号"],["status_code","ステータス"],["mold_name","金型名"],["mold_no","金型番号"],["order_no","製造番号"],["product_name","品名"],["qty_plan","予定数"],["qty_ok","良品数"],["qty_ng","不良数"],["qty_remaining","残数"],["cycle_seconds","サイクル"],["pick_qty","取り数"],["staff_name","担当者"],["scheduled_end_at","完了予定"]];
 let lastAllSignature="";
 function drawAll(){
  // ALL shows every stored schedule row per machine, across all available dates.
@@ -111,4 +130,25 @@ async function refresh(){
  if(view==="dashboard")drawDashboard();if(view==="schedule")drawSchedule();if(view==="all")drawAll();
  }catch(e){$("connection").textContent="OFFLINE"}
 }
+function safeRead(key,otherwise){try{return localStorage.getItem(key)??otherwise}catch{return otherwise}}
+function safeStore(key,value){try{localStorage.setItem(key,value)}catch{}}
+function setNodeSize(value){
+ const v=Math.max(220,Math.min(520,Math.round((Number(value)||300)/10)*10));
+ document.documentElement.style.setProperty("--node-width",v+"px");
+ $("node-size").value=String(v);$("size-output").textContent=v+"px";
+ safeStore("mics-only:node-width",String(v));
+}
+function setSidebar(collapsed){
+ $("app-shell").classList.toggle("menu-collapsed",collapsed);
+ const button=$("menu-toggle");
+ button.textContent=collapsed?"❮":"❯";
+ button.setAttribute("aria-expanded",String(!collapsed));
+ button.setAttribute("aria-label",collapsed?"メニューを開く":"メニューを閉じる");
+ button.title=collapsed?"メニューを開く":"メニューを閉じる";
+ safeStore("mics-only:menu-collapsed",collapsed?"1":"0");
+}
+setNodeSize(safeRead("mics-only:node-width","300"));
+setSidebar(safeRead("mics-only:menu-collapsed",window.innerWidth<=800?"1":"0")==="1");
+$("node-size").addEventListener("input",e=>setNodeSize(e.target.value));
+$("menu-toggle").addEventListener("click",()=>setSidebar(!$("app-shell").classList.contains("menu-collapsed")));
 refresh();setInterval(refresh,3000);if("serviceWorker"in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>{});
