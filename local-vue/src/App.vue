@@ -59,7 +59,8 @@ function prediction(m){
 function mondayInJst(offset){
  const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())
  const d=new Date(parts+'T00:00:00+09:00')
- d.setUTCDate(d.getUTCDate()-(d.getUTCDay()+6)%7+offset*7)
+ const localDay=new Date(d.getTime()+9*3600000).getUTCDay()
+ d.setUTCDate(d.getUTCDate()-(localDay+6)%7+offset*7)
  return d
 }
 const weekStart=computed(()=>mondayInJst(week.value))
