@@ -7,6 +7,8 @@ pub struct LocalState {
     pub snapshot: Arc<Mutex<Value>>,
     pub mode: Arc<Mutex<String>>,
     pub data_path: PathBuf,
+    pub sync_status: Arc<Mutex<String>>,
+    pub last_sync_at: Arc<Mutex<Option<String>>>,
 }
 impl LocalState {
     pub fn new(data_path:PathBuf)->Self {
@@ -14,16 +16,34 @@ impl LocalState {
             .and_then(|raw|serde_json::from_slice::<Value>(&raw).ok())
             .filter(|v|v.get("machines").and_then(Value::as_array).is_some())
             .unwrap_or_else(||json!({"source":"mics-only","machines":[],"sampled_at":null}));
-        Self{snapshot:Arc::new(Mutex::new(initial)),mode:Arc::new(Mutex::new("STANDBY".into())),data_path}
+        Self{snapshot:Arc::new(Mutex::new(initial)),mode:Arc::new(Mutex::new("STANDBY".into())),
+            sync_status:Arc::new(Mutex::new("NOT_SYNCED".into())),last_sync_at:Arc::new(Mutex::new(None)),data_path}
     }
     pub fn set_mode(&self,mode:&str) {
         if let Ok(mut m)=self.mode.lock(){*m=mode.to_owned()}
+    }
+    pub fn record_sync(&self,status:&str){
+        if let Ok(mut s)=self.sync_status.lock(){*s=status.to_owned();}
+        if status=="SYNCED"{
+            if let Ok(mut t)=self.last_sync_at.lock(){*t=Some(chrono::Utc::now().to_rfc3339());}
+        }
+        // Status is informational; never store credentials or raw error messages.
+        let time=self.last_sync_at.lock().ok().and_then(|v|v.clone());
+        let summary=json!({"status":status,"last_sync_at":time});
+        if let Some(parent)=self.data_path.parent(){
+            let _=fs::create_dir_all(parent);
+            let _=fs::write(parent.join("sync-status.json"),summary.to_string());
+        }
     }
     pub fn update(&self,mut data:Value)->Result<(),String>{
         if data.get("machines").and_then(Value::as_array).is_none_or(|a|a.is_empty()){
             return Err("Refusing empty snapshot".into())
         }
         data["source"]=json!("mics-only");
+        // Avoid rewriting identical machine values on failed cloud retries.
+        let unchanged=self.snapshot.lock().ok().map(|old|
+            old.get("machines")==data.get("machines")).unwrap_or(false);
+        if unchanged{return Ok(())}
         let bytes=serde_json::to_vec_pretty(&data).map_err(|e|e.to_string())?;
         if let Some(parent)=self.data_path.parent(){fs::create_dir_all(parent).map_err(|e|e.to_string())?}
         let tmp=self.data_path.with_extension("json.tmp");
@@ -91,7 +111,9 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
             let v=snapshot();
             ("200 OK","application/json; charset=utf-8",serde_json::to_vec(&json!({
                 "ok":true,"mode":mode,"sampled_at":v.get("sampled_at"),"machine_count":v["machines"].as_array().map(|a|a.len()).unwrap_or(0),
-                "server":"127.0.0.1:8787"
+                "server":"127.0.0.1:8787",
+                "sync_status":state.sync_status.lock().map(|s|s.clone()).unwrap_or("UNKNOWN".into()),
+                "last_sync_at":state.last_sync_at.lock().ok().and_then(|v|v.clone())
             })).unwrap_or_default(),"no-store")
         }
         _=>("404 Not Found","text/plain",b"Not Found".to_vec(),"no-store")
