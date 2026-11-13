@@ -280,3 +280,51 @@
  .node .progress small{top:48px;font-size:8px}
  .node .quantities dd{font-size:12px}
 }
+
+/* Operator display layout: top-left menu with fullscreen immediately underneath. */
+.layout > main{width:100%;max-width:1650px;margin:0 auto;padding:10px 15px 22px}
+.app-top-layout{display:flex;align-items:flex-start;gap:14px;min-height:72px;margin:0 0 9px}
+.top-command-area{flex:0 0 118px;width:118px;display:grid;align-content:start;gap:6px;position:relative;z-index:5}
+.top-command-header{position:relative}
+.top-command-area .menu-toggle{display:block;width:100%;height:34px;border:1px solid #b9cee2;border-radius:9px;color:#fff;background:#20496f;font-size:12px;font-weight:800;cursor:pointer}
+.top-command-area .fullscreen-toggle{display:block;width:100%;height:32px;border:1px solid #b9cee2;border-radius:9px;color:#24476b;background:#fff;font-size:11px;font-weight:800;padding:5px;cursor:pointer}
+.top-command-nav{position:absolute;top:38px;left:0;z-index:12;width:185px;display:grid;gap:5px;padding:8px;background:#fff;border:1px solid #bbcee1;border-radius:10px;box-shadow:0 8px 24px #16325030}
+.top-command-nav[hidden]{display:none!important}
+.top-command-nav .nav{display:block;width:100%;font-size:12px;text-align:left;padding:9px;background:#edf4fb;color:#21486c;border:1px solid #dce6f0}
+.top-command-nav .nav.active,.top-command-nav .nav:hover{background:#20745b;color:#fff}
+.layout.menu-collapsed .top-command-nav{display:none}
+.page-title-compact{flex:1 1 auto;min-width:0;padding-top:4px}
+.page-title-compact .eyebrow{display:block;font-size:10px}
+.page-title-compact h1{font-size:20px;line-height:1.3;margin:2px 0 0}
+
+/* Status summary is at the end of the document, not at the top. */
+.page-footer{position:static;margin-top:20px}
+.page-footer .footer-summary-title{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.page-footer .footer-summary-title strong{font-size:12px;color:#25476b}
+.page-footer .summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin:0;padding:0}
+.page-footer .summary .stat{display:flex;flex-direction:column;gap:2px;min-height:0;padding:8px 10px;border-radius:9px;background:#f6f9fd;border:1px solid #dae6f2}
+.page-footer .summary .stat span{font-size:10px}
+.page-footer .summary .stat b{font-size:15px}
+.page-footer .summary .stat.server b{font-size:12px}
+.page-footer .summary .stat.server span{font-size:10px}
+
+/* Warning ribbon is inline above machines; NEVER covers production nodes.
+   Multiple warnings scroll horizontally rather than occupy the display. */
+.ng-alerts,.ng-alerts:not([hidden]){
+ position:static!important;top:auto!important;right:auto!important;left:auto!important;
+ width:100%!important;max-height:none!important;max-width:none;
+ overflow-x:auto;overflow-y:hidden;display:flex;align-items:stretch;gap:6px;
+ pointer-events:auto;margin:0 0 9px;padding:2px 1px 4px;z-index:auto
+}
+.ng-alerts[hidden]{display:none!important}
+.ng-alerts .ng-warning-line{flex:0 0 auto;min-width:215px;max-width:300px;padding:5px 9px;box-shadow:none;animation:none;border-color:#e9bf85;background:rgba(255,244,224,.78)}
+.ng-alerts .ng-warning-line strong{font-size:10px}
+.ng-alerts .ng-warning-line span{font-size:9px}
+@media(max-width:720px){
+ .layout > main{padding:10px 9px 20px}
+ .app-top-layout{gap:9px}
+ .top-command-area{flex-basis:96px;width:96px}
+ .page-title-compact h1{font-size:17px}
+ .page-footer .summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .page-footer .summary .stat.server{grid-column:span 2}
+}
