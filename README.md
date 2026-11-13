@@ -110,3 +110,11 @@ The web is served from editable `www/` next to the executable. To update only th
 - mics.ini, %LOCALAPPDATA%/MICS-Only/credentials.dpapi, data snapshots and existing www files are retained without overwrites. No print agent is updated or stopped.
 - Auto-update is not a substitute for coordinator lease fencing. Do not run two installations with the same agent_id, especially when enabled for standby failover.
 - If the installation folder is not writable or PowerShell is blocked by Windows policy, the update is not applied. The last known working EXEs are kept at data/update-backup after success for manual recovery.
+
+## Admin-managed mics-only versions (v0.2.5)
+
+Every Coordinator /presence heartbeat now includes the installed mics-only version. The Cloudflare Admin > MICS Lease table shows each agent's current version and the latest downloadable GitHub Release version. Only authenticated admins can request an update, and only agents running v0.2.5+ support the remote-update command.
+
+A remote update request is queued in Cloudflare D1, returned on the normal 60-second /presence response, and applied using the existing GitHub Release downloader and rollback helper. The agent does not stop during an ACTIVE Firebird lease. An enabled standby waits until its local mode is STANDBY, while a disabled standby can update in MIRROR_ONLY mode. Existing mics.ini, DPAPI secrets, production snapshots, and print agents are not modified. Presence reports the new version after restart so Admin can mark the queued request completed.
+
+Note: Earlier v0.2.4 and older versions do not support remote commands. Upgrade those once using the local Settings GitHub Update button; subsequent releases can be requested from Admin.
