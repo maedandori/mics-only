@@ -3,6 +3,7 @@
 mod credentials;
 mod local_web;
 mod schedule;
+mod mirror;
 use chrono::{DateTime, Utc};
 use rsfbclient::prelude::*;
 use serde::Deserialize;
@@ -198,6 +199,7 @@ fn run(c: Config) -> Result<(), String> {
         secret("MICS_COORDINATOR_TOKEN")?,
     );
     let mut previous_hash = String::new();
+    let mut last_mirror:Option<std::time::Instant>=None;
     let mut schedule_polled_at:Option<std::time::Instant>=None;
     loop {
         match acquire(&c, &coordinator_token) {
@@ -255,7 +257,16 @@ fn run(c: Config) -> Result<(), String> {
                     Err(e) => {local.record_sync("READ_FAILED");eprintln!("MICS_READ_FAILED {e}");},
                 }
             }
-            Ok(None) => { local.set_mode("STANDBY"); previous_hash.clear(); println!("STANDBY: coordinator denied lease"); }
+            Ok(None) => {
+                local.set_mode("STANDBY");
+                previous_hash.clear();
+                if last_mirror.map(|t|t.elapsed()>Duration::from_secs(300)).unwrap_or(true){
+                    last_mirror=Some(std::time::Instant::now());
+                    if let Err(e)=mirror::refresh(&c,&sync_token,&local){
+                        eprintln!("STANDBY_LOCAL_MIRROR_FAILED {e}");
+                    }
+                }
+            }
             Err(e) => { local.set_mode("OFFLINE"); previous_hash.clear(); eprintln!("{e}"); }
         }
         thread::sleep(Duration::from_secs(c.interval));
