@@ -1,6 +1,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 #[cfg(windows)]
 mod credentials;
+#[cfg(windows)]
+mod updater;
 mod local_web;
 mod schedule;
 mod mirror;
@@ -190,6 +192,34 @@ fn run(c: Config) -> Result<(), String> {
     // Always serve the local dashboard, even when standby is disabled or lease denied.
     let local=local_web::LocalState::new(local_web::default_snapshot_path());
     local_web::start(local.clone())?;
+    // Check GitHub every six hours; postpone while ACTIVE (Firebird lease holder).
+    // Update applies only to this standby agent; the independent print agent is untouched.
+    #[cfg(windows)]
+    {
+        let state=local.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(300));
+            loop {
+                let safe=state.mode.lock().map(|m|m.as_str()!="ACTIVE").unwrap_or(false);
+                if safe {
+                    if let Ok(exe)=env::current_exe(){
+                        match updater::install_if_available(&exe){
+                            Ok(result) if result.starts_with("UPDATE_STAGED ")=>{
+                                let still_safe=state.mode.lock().map(|m|m.as_str()!="ACTIVE").unwrap_or(false);
+                                if still_safe {
+                                    println!("{result}");
+                                    std::process::exit(0);
+                                }
+                            },
+                            Ok(_)=>{},
+                            Err(e)=>eprintln!("AUTO_UPDATE_CHECK_FAILED {e}")
+                        }
+                    }
+                }
+                thread::sleep(Duration::from_secs(21600));
+            }
+        });
+    }
     if !c.enabled {
         // Safe MIRROR_ONLY mode: local dashboard can show the primary's
         // authenticated Cloudflare cache while NEVER opening Firebird or
