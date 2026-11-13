@@ -14,7 +14,7 @@ use std::{collections::BTreeMap, env, fs, net::{TcpStream,ToSocketAddrs}, thread
 #[derive(Debug)]
 struct Config {
     enabled: bool, agent_id: String, host: String, port: u16,
-    database: String, user: String, coordinator_url: String, interval: u64,
+    database: String, user: String, coordinator_url: String, interval: u64, display_name: String,
 }
 impl Config {
     fn load() -> Result<Self, String> {
@@ -41,6 +41,7 @@ impl Config {
             user: field("user"),
             coordinator_url: field("coordinator_url"),
             interval: field("interval_seconds").parse().map_err(|_| "Invalid interval")?,
+            display_name: field("display_name"),
         };
         config.validate()?;
         Ok(config)
@@ -87,6 +88,17 @@ fn secret(name: &str) -> Result<String, String> {
 }
 fn client() -> ureq::Agent {
     ureq::AgentBuilder::new().timeout(Duration::from_secs(15)).build()
+}
+fn presence(c:&Config,coordinator_token:&str)->Result<(),String>{
+ if coordinator_token.is_empty()||c.coordinator_url.is_empty(){return Ok(())}
+ let url=url::Url::parse(&c.coordinator_url).map_err(|e|e.to_string())?;
+ if url.scheme()!="https"||url.host_str().is_none(){return Ok(())}
+ let result=client().post(&format!("{}/presence",c.coordinator_url.trim_end_matches('/')))
+  .set("Authorization",&format!("Bearer {coordinator_token}"))
+  .send_json(json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"standby_enabled":c.enabled}))
+  .map_err(|e|format!("PRESENCE_FAILED {e}"))?;
+ if result.status()!=200{return Err(format!("PRESENCE_HTTP_{}",result.status()))}
+ Ok(())
 }
 fn acquire(c: &Config, coordinator_token: &str) -> Result<Option<Lease>, String> {
     let response = client().post(&format!("{}/lease", c.coordinator_url.trim_end_matches('/')))
@@ -188,10 +200,16 @@ fn run(c: Config) -> Result<(), String> {
         let mirror_secret=credentials::load().ok().map(|v|v.mics_sync_token).unwrap_or_default();
         #[cfg(not(windows))]
         let mirror_secret=env::var("MICS_SYNC_TOKEN").unwrap_or_default();
+        #[cfg(windows)]
+        let presence_secret=credentials::load().ok().map(|v|v.coordinator_token).unwrap_or_default();
+        #[cfg(not(windows))]
+        let presence_secret=env::var("MICS_COORDINATOR_TOKEN").unwrap_or_default();
+
         let valid_url=url::Url::parse(&c.coordinator_url).ok()
             .is_some_and(|u|u.scheme()=="https"&&u.host_str().is_some()
                 &&u.username()==""&&u.password().is_none());
         loop {
+            if valid_url&&!presence_secret.is_empty(){let _=presence(&c,&presence_secret);}
             if valid_url&&!mirror_secret.is_empty(){
                 if let Err(e)=mirror::refresh(&c,&mirror_secret,&local){
                     eprintln!("MIRROR_ONLY_CACHE_ERROR {e}");
@@ -217,7 +235,12 @@ fn run(c: Config) -> Result<(), String> {
     let mut previous_hash = String::new();
     let mut last_mirror:Option<std::time::Instant>=None;
     let mut schedule_polled_at:Option<std::time::Instant>=None;
+    let mut last_presence:Option<std::time::Instant>=None;
     loop {
+        if last_presence.map(|t|t.elapsed()>=Duration::from_secs(60)).unwrap_or(true){
+            let _=presence(&c,&coordinator_token);
+            last_presence=Some(std::time::Instant::now());
+        }
         match acquire(&c, &coordinator_token) {
             Ok(Some(lease)) => {
                 local.set_mode("ACTIVE");
