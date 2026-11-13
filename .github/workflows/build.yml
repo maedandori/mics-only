@@ -23,9 +23,9 @@ jobs:
       - name: Verify packaged Vue assets
         shell: pwsh
         run: |
-          if (!(Test-Path www/vue-v0.2.6/index.html)) { throw 'Vue index missing' }
-          if (!(Get-ChildItem www/vue-v0.2.6/assets -Filter '*.js')) { throw 'Vue JS asset missing' }
-          if (!(Get-ChildItem www/vue-v0.2.6/assets -Filter '*.css')) { throw 'Vue CSS asset missing' }
+          if (!(Test-Path www/vue-v0.2.7/index.html)) { throw 'Vue index missing' }
+          if (!(Get-ChildItem www/vue-v0.2.7/assets -Filter '*.js')) { throw 'Vue JS asset missing' }
+          if (!(Get-ChildItem www/vue-v0.2.7/assets -Filter '*.css')) { throw 'Vue CSS asset missing' }
       - name: Test Rust
         run: cargo test
       - name: Compile Windows EXEs
@@ -51,8 +51,8 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.2.6
-          name: MICS Only v0.2.6
+          tag_name: v0.2.7
+          name: MICS Only v0.2.7
           target_commitish: ${{ github.sha }}
           draft: false
           prerelease: false
