@@ -435,3 +435,6 @@
  .layout > main{padding:69px 6px 12px}
  .app-top-layout{left:6px;top:3px;width:96px}
 }
+
+/* Per-shift defect count is primary; lifetime total stays secondary. */
+.quantities .ng-total{display:block;font-size:11px;color:#91a7c4;line-height:1.2;margin-top:2px;white-space:nowrap}
