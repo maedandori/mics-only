@@ -30,13 +30,16 @@ try {
   New-Item -ItemType Directory -Path $stage -Force | Out-Null
   Expand-Archive -LiteralPath $Archive -DestinationPath $stage -Force
   foreach($name in $names){if(!(Test-Path -LiteralPath (Join-Path $stage $name))){throw "Missing $name"}}
-  try{Wait-Process -Id $ParentId -Timeout 75 -ErrorAction Stop}catch{
-    if(Get-Process -Id $ParentId -ErrorAction SilentlyContinue){throw 'Parent did not exit'}
+  if($ParentId -gt 0){
+    try{Wait-Process -Id $ParentId -Timeout 75 -ErrorAction Stop}catch{
+      if(Get-Process -Id $ParentId -ErrorAction SilentlyContinue){throw 'Parent did not exit'}
+    }
   }
   # Do not terminate an ACTIVE agent, and never stop another print process.
   $status=$null
   try{$status=Invoke-RestMethod -Uri 'http://127.0.0.1:8787/api/status' -TimeoutSec 3}catch{}
   if($status -and $status.mode -eq 'ACTIVE'){throw 'ACTIVE agent, update postponed'}
+  if($ParentId -eq 0 -and (!$status -or !$status.ok)){throw 'Agent status unavailable, update postponed'}
   # Settings invocation may leave agent running. Stop only mics-only by name.
   Get-Process -Name 'mics-only' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction Stop
   Start-Sleep -Milliseconds 700
@@ -64,7 +67,7 @@ try {
   # Keep backup until next successful update, for emergency manual recovery.
 }catch{
   Log "UPDATE_FAILED $($_.Exception.Message)"
-  if($_.Exception.Message -ne 'ACTIVE agent, update postponed'){
+  if($_.Exception.Message -notin @('ACTIVE agent, update postponed','Agent status unavailable, update postponed')){
     New-Item -ItemType Directory -Path (Join-Path $Target 'data') -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $Target 'data\update-blocked-version.txt') -Value $Version
   }
