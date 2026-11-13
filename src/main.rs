@@ -98,7 +98,13 @@ fn presence(c:&Config,coordinator_token:&str)->Result<(),String>{
  let result=client().post(&format!("{}/presence",c.coordinator_url.trim_end_matches('/')))
   .set("Authorization",&format!("Bearer {coordinator_token}"))
   .send_json(json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled}))
-  .map_err(|e|format!("PRESENCE_FAILED {e}"))?;
+  .map_err(|e|match e {
+      ureq::Error::Status(status, response) => {
+          let detail=response.into_string().unwrap_or_default();
+          format!("PRESENCE_HTTP_{status} {}",detail.chars().take(250).collect::<String>())
+      },
+      other => format!("PRESENCE_FAILED {other}")
+  })?;
  if result.status()!=200{return Err(format!("PRESENCE_HTTP_{}",result.status()))}
  Ok(())
 }
