@@ -185,6 +185,7 @@ function drawSchedule(){
 }
 function show(viewName){view=viewName;for(const v of ["dashboard","schedule","all"])$(v+"-view").hidden=v!==viewName;document.querySelectorAll(".nav").forEach(b=>b.classList.toggle("active",b.dataset.view===viewName));$("page-title").textContent={dashboard:"ダッシュボード",schedule:"予定",all:"全て"}[viewName];if(viewName==="schedule")drawSchedule();if(viewName==="all")drawAll()}
 document.querySelectorAll(".nav").forEach(b=>b.onclick=()=>show(b.dataset.view));
+document.querySelectorAll(".top-command-nav .nav").forEach(b=>b.addEventListener("click",()=>setSidebar(true)));
 $("current-week").onclick=()=>{week=0;weekButtons();drawSchedule()};
 $("next-week").onclick=()=>{week=1;weekButtons();drawSchedule()};
 function weekButtons(){$("current-week").classList.toggle("selected",week===0);$("next-week").classList.toggle("selected",week===1)}
@@ -213,15 +214,16 @@ function setNodeSize(value){
 }
 function setSidebar(collapsed){
  $("app-shell").classList.toggle("menu-collapsed",collapsed);
- const button=$("menu-toggle");
- button.textContent=collapsed?"❮":"❯";
+ const nav=$("footer-nav"),button=$("menu-toggle");
+ nav.hidden=collapsed;
+ button.textContent=collapsed?"☰ メニュー":"✕ 閉じる";
  button.setAttribute("aria-expanded",String(!collapsed));
  button.setAttribute("aria-label",collapsed?"メニューを開く":"メニューを閉じる");
  button.title=collapsed?"メニューを開く":"メニューを閉じる";
  safeStore("mics-only:menu-collapsed",collapsed?"1":"0");
 }
 setNodeSize(safeRead("mics-only:node-width","300"));
-setSidebar(safeRead("mics-only:menu-collapsed",window.innerWidth<=800?"1":"0")==="1");
+setSidebar(safeRead("mics-only:menu-collapsed","1")==="1");
 $("node-size").addEventListener("input",e=>setNodeSize(e.target.value));
 $("menu-toggle").addEventListener("click",()=>setSidebar(!$("app-shell").classList.contains("menu-collapsed")));
 const fullButton=$("fullscreen-toggle");
