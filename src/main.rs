@@ -1,11 +1,12 @@
 #[cfg(windows)]
 mod credentials;
+mod local_web;
 use chrono::{DateTime, Utc};
 use rsfbclient::prelude::*;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, env, fs, path::PathBuf, thread, time::Duration};
+use std::{collections::BTreeMap, env, fs, net::{TcpStream,ToSocketAddrs}, path::PathBuf, thread, time::Duration};
 
 #[derive(Debug)]
 struct Config {
@@ -171,7 +172,14 @@ fn upload(c: &Config, sync_token: &str, lease: &Lease, snapshot: Value) -> Resul
     Ok(())
 }
 fn run(c: Config) -> Result<(), String> {
-    if !c.enabled {println!("MICS standby disabled in mics.ini");return Ok(())}
+    // Always serve the local dashboard, even when standby is disabled or lease denied.
+    let local=local_web::LocalState::new(local_web::default_snapshot_path());
+    local_web::start(local.clone())?;
+    if !c.enabled {
+        local.set_mode("DISABLED");
+        println!("MICS standby disabled; local dashboard remains available");
+        loop {thread::sleep(Duration::from_secs(3600))}
+    }
     // Read secrets once; never print secrets or raw employee/snapshot data.
     // On Windows, use a per-user DPAPI vault distinct from mics-print.
     // Never send secrets via command-line arguments or store them in mics.ini.
@@ -190,6 +198,7 @@ fn run(c: Config) -> Result<(), String> {
     loop {
         match acquire(&c, &coordinator_token) {
             Ok(Some(lease)) => {
+                local.set_mode("ACTIVE");
                 match read(&c, &db_password) {
                     Ok(mut data) => {
                         if data["machines"].as_array().is_none_or(|a| a.is_empty()) {
@@ -201,6 +210,7 @@ fn run(c: Config) -> Result<(), String> {
                                 Ok(Some(new_lease)) if new_lease.epoch == lease.epoch => {
                                     if hash != previous_hash {
                                         data["sampled_at"] = json!(Utc::now().to_rfc3339());
+                                        if let Err(e)=local.update(data.clone()){eprintln!("LOCAL_SNAPSHOT_FAILED {e}")}
                                         match upload(&c, &sync_token, &new_lease, data) {
                                             Ok(()) => { previous_hash = hash; println!("MICS_SYNC_OK epoch={}", new_lease.epoch); },
                                             Err(e) => eprintln!("{e}"),
@@ -214,15 +224,39 @@ fn run(c: Config) -> Result<(), String> {
                     Err(e) => eprintln!("MICS_READ_FAILED {e}"),
                 }
             }
-            Ok(None) => { previous_hash.clear(); println!("STANDBY: coordinator denied lease"); }
-            Err(e) => { previous_hash.clear(); eprintln!("{e}"); }
+            Ok(None) => { local.set_mode("STANDBY"); previous_hash.clear(); println!("STANDBY: coordinator denied lease"); }
+            Err(e) => { local.set_mode("OFFLINE"); previous_hash.clear(); eprintln!("{e}"); }
         }
         thread::sleep(Duration::from_secs(c.interval));
     }
 }
+fn test_connection(c:&Config)->Result<(),String>{
+    // Safe connectivity test: TCP reachability only, never authenticates to
+    // Firebird and never runs SQL or acquires a failover lease.
+    if c.host.is_empty()||c.port==0{return Err("Firebird host/port not configured".into())}
+    let addr=format!("{}:{}",c.host,c.port);
+    let addresses=addr.to_socket_addrs().map_err(|e|format!("Firebird DNS error: {e}"))?;
+    let mut ok=false;
+    for address in addresses {
+        if TcpStream::connect_timeout(&address,Duration::from_secs(3)).is_ok(){ok=true;break}
+    }
+    if !ok{return Err("Firebird TCP connectivity FAILED (no database login attempted)".into())}
+    println!("FIREBIRD_TCP_OK (no SQL executed)");
+    if c.coordinator_url.is_empty(){
+        println!("COORDINATOR_NOT_CONFIGURED");return Ok(())
+    }
+    let health=format!("{}/health",c.coordinator_url.trim_end_matches('/'));
+    let response=client().get(&health).call().map_err(|e|format!("COORDINATOR_HTTP_FAILED {e}"))?;
+    let result:Value=response.into_json().map_err(|e|format!("COORDINATOR_BAD_RESPONSE {e}"))?;
+    if result["service"]!="mics-failover"||result["ok"]!=true{return Err("Coordinator health response is invalid".into())}
+    println!("COORDINATOR_HTTP_OK; enabled={}",result["enabled"]);
+    Ok(())
+}
 fn main() {
     let result = Config::load().and_then(|c| {
-        if env::args().any(|arg| arg == "--check-config") {
+        if env::args().any(|arg| arg == "--test-connection") {
+            test_connection(&c)
+        } else if env::args().any(|arg| arg == "--check-config") {
             println!("Configuration syntax OK; credentials/network not checked");
             Ok(())
         } else {run(c)}
