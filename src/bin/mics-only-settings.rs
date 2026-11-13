@@ -30,7 +30,7 @@ fn main() {
     let get = |k:&str,d:&str| original.get(k).cloned().unwrap_or_else(||d.into());
 
     let mut window=nwg::Window::default();
-    nwg::Window::builder().size((790,780)).position((190,65))
+    nwg::Window::builder().size((790,875)).position((190,65))
         .title("MICS Only Settings / MICS 予備機設定")
         .build(&mut window).expect("Window error");
 
@@ -114,6 +114,20 @@ fn main() {
     nwg::Button::builder().text("Open Local Web").parent(&window)
         .position((230,695)).size((190,36)).build(&mut open_web).unwrap();
 
+    // Agent management uses only mics-only.exe; printing processes stay untouched.
+    let mut start_agent=nwg::Button::default();
+    nwg::Button::builder().text("Start Agent / 起動").parent(&window)
+        .position((25,738)).size((155,36)).build(&mut start_agent).unwrap();
+    let mut stop_agent=nwg::Button::default();
+    nwg::Button::builder().text("Stop Agent / 停止").parent(&window)
+        .position((190,738)).size((155,36)).build(&mut stop_agent).unwrap();
+    let mut restart_agent=nwg::Button::default();
+    nwg::Button::builder().text("Restart Agent / 再起動").parent(&window)
+        .position((355,738)).size((175,36)).build(&mut restart_agent).unwrap();
+    let mut update_agent=nwg::Button::default();
+    nwg::Button::builder().text("GitHub Update / 更新").parent(&window)
+        .position((540,738)).size((225,36)).build(&mut update_agent).unwrap();
+
     let mut save=nwg::Button::default();
     nwg::Button::builder().text("Save / 保存").parent(&window)
         .position((470,695)).size((140,36)).build(&mut save).unwrap();
@@ -125,6 +139,10 @@ fn main() {
     let autostart=Rc::new(autostart);
     let test=Rc::new(test);
     let open_web=Rc::new(open_web);
+    let start_agent=Rc::new(start_agent);
+    let stop_agent=Rc::new(stop_agent);
+    let restart_agent=Rc::new(restart_agent);
+    let update_agent=Rc::new(update_agent);
     let save=Rc::new(save);
     let close=Rc::new(close);
     let fields=Rc::new(inputs);
@@ -139,6 +157,10 @@ fn main() {
         let autostart=autostart.clone();
         let test=test.clone();
         let open_web=open_web.clone();
+        let start_agent=start_agent.clone();
+        let stop_agent=stop_agent.clone();
+        let restart_agent=restart_agent.clone();
+        let update_agent=update_agent.clone();
         let save=save.clone();
         let close=close.clone();
         let ini=ini.clone();
@@ -168,6 +190,37 @@ fn main() {
                         else{nwg::error_message("Connection Test FAILED", &detail);}
                     }
                     Err(e)=>{nwg::error_message("Connection Test", &format!("Could not run mics-only.exe: {e}"));}
+                }
+                return
+            }
+            if handle==start_agent.handle {
+                if Command::new(&agent_exe).creation_flags(0x08000000).spawn().is_ok(){
+                    nwg::simple_message("MICS Only","Start requested. Check Local Web at 127.0.0.1:8787.");
+                }else{nwg::error_message("MICS Only","Cannot start mics-only.exe");}
+                return
+            }
+            if handle==stop_agent.handle {
+                let o=Command::new("taskkill").args(["/F","/IM","mics-only.exe"])
+                    .creation_flags(0x08000000).output();
+                match o {
+                    Ok(v) if v.status.success()=>{nwg::simple_message("MICS Only","Agent stopped. Local web is now offline.");},
+                    _=>{nwg::simple_message("MICS Only","Agent was not running or could not be stopped.");}
+                }
+                return
+            }
+            if handle==restart_agent.handle {
+                let _=Command::new("taskkill").args(["/F","/IM","mics-only.exe"])
+                    .creation_flags(0x08000000).status();
+                match Command::new(&agent_exe).creation_flags(0x08000000).spawn(){
+                    Ok(_)=>{nwg::simple_message("MICS Only","Agent restart requested.");},
+                    Err(e)=>{nwg::error_message("MICS Only",&format!("Restart failed: {e}"));}
+                }
+                return
+            }
+            if handle==update_agent.handle {
+                match github_update(&agent_exe) {
+                    Ok(result)=>{nwg::simple_message("GitHub Update",&result);},
+                    Err(e)=>{nwg::error_message("GitHub Update",&e);}
                 }
                 return
             }
@@ -262,10 +315,54 @@ fn main() {
         }
     });
     // Keep window-owned controls alive for the duration of the event loop.
-    let _controls=(heading,labels,secret_labels,note,status,test,open_web,save,close,enable,autostart,state);
+    let _controls=(heading,labels,secret_labels,note,status,test,open_web,start_agent,stop_agent,restart_agent,update_agent,save,close,enable,autostart,state);
     nwg::dispatch_thread_events();
 }
 #[cfg(not(windows))]
 fn main() {
     eprintln!("MICS Only Settings requires Windows.");
+}
+
+#[cfg(windows)]
+fn github_update(agent_exe:&std::path::Path)->Result<String,String>{
+    use std::{fs,io::{Read,Write},process::Command};
+    use std::os::windows::process::CommandExt;
+    // Only official Releases from the fixed repository; never accept arbitrary URLs.
+    let api="https://api.github.com/repos/maedandori/mics-only/releases/latest";
+    let response=ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(20)).build()
+        .get(api).set("User-Agent","mics-only-settings-updater")
+        .call().map_err(|e|format!("Release check failed: {e}. Check GitHub Releases."))?;
+    let info:serde_json::Value=response.into_json().map_err(|e|e.to_string())?;
+    let tag=info["tag_name"].as_str().ok_or("Release tag missing")?;
+    if !tag.starts_with('v')||tag.len()>32||!tag[1..].bytes().all(|c|c.is_ascii_digit()||c==b'.'){
+        return Err("Invalid release version".into())
+    }
+    let current=format!("v{}",env!("CARGO_PKG_VERSION"));
+    if tag==current{return Ok(format!("Already up to date ({current})."))}
+    let assets=info["assets"].as_array().ok_or("Release assets missing")?;
+    let asset=assets.iter().find(|a|a["name"]=="MICS-Only-Setup.exe")
+        .ok_or("Release does not contain MICS-Only-Setup.exe")?;
+    let url=asset["browser_download_url"].as_str().ok_or("Download URL missing")?;
+    if !url.starts_with("https://github.com/maedandori/mics-only/releases/download/")||
+        !url.ends_with("/MICS-Only-Setup.exe"){return Err("Untrusted release URL".into())}
+    let size=asset["size"].as_u64().unwrap_or(0);
+    if size==0||size>120_000_000{return Err("Unexpected installer size".into())}
+    let release=ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(180)).build()
+        .get(url).set("User-Agent","mics-only-settings-updater")
+        .call().map_err(|e|format!("Installer download failed: {e}"))?;
+    let dir=std::env::temp_dir().join("MICS-Only-Update");
+    fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
+    let target=dir.join("MICS-Only-Setup.exe");
+    let mut file=fs::File::create(&target).map_err(|e|e.to_string())?;
+    let count=std::io::copy(&mut release.into_reader().take(120_000_001),&mut file).map_err(|e|e.to_string())?;
+    file.flush().map_err(|e|e.to_string())?;
+    if count!=size{let _=fs::remove_file(&target);return Err("Downloaded installer size mismatch".into())}
+    // The official installer is launched by the user. Never force-stop the
+    // active synchronization agent before the installer can complete.
+    Command::new(&target).arg("/CLOSEAPPLICATIONS")
+        .creation_flags(0x08000000).spawn().map_err(|e|e.to_string())?;
+    let _=agent_exe;
+    Ok(format!("Installer {tag} launched. Follow the setup window to finish updating."))
 }
