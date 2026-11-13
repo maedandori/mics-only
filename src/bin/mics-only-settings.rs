@@ -246,7 +246,7 @@ fn main() {
                     cfg.insert(*k,value);
                 }
                 let device_name=display_name.text().trim().to_owned();
-                if device_name.chars().count()>60||device_name.contains(['\\r','\\n']){return Err("Tên máy phải dưới 60 ký tự, không chứa xuống dòng".into())}
+                if device_name.chars().count()>60||device_name.chars().any(|c|c.is_control()){return Err("Tên máy phải dưới 60 ký tự, không chứa xuống dòng".into())}
                 cfg.insert("display_name",device_name);
                 let enabled=enable.check_state()==nwg::CheckBoxState::Checked;
                 let number=cfg["port"].parse::<u16>().map_err(|_|"Invalid Firebird port")?;
