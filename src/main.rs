@@ -209,7 +209,21 @@ fn run(c: Config) -> Result<(), String> {
                     if let Ok(Some(grant))=acquire(&c,&coordinator_token){
                         if grant.epoch==lease.epoch{
                             match schedule::collect(&c,&db_password){
-                                Ok(_)=>{schedule_polled_at=Some(std::time::Instant::now());println!("LOCAL_SCHEDULE_CACHE_OK");},
+                                Ok(cache)=>{
+                                    schedule_polled_at=Some(std::time::Instant::now());
+                                    println!("LOCAL_SCHEDULE_CACHE_OK");
+                                    // Fenced upload; retain cache and retry on later reads.
+                                    match acquire(&c,&coordinator_token) {
+                                        Ok(Some(upload_lease)) if upload_lease.epoch==lease.epoch=>{
+                                            match schedule::upload_if_changed(&c,&sync_token,&upload_lease,&cache){
+                                                Ok(true)=>println!("MICS_SCHEDULE_SYNC_OK"),
+                                                Ok(false)=>(),
+                                                Err(e)=>eprintln!("MICS_SCHEDULE_SYNC_FAILED {e}")
+                                            }
+                                        },
+                                        _=>eprintln!("MICS_SCHEDULE_LEASE_LOST")
+                                    }
+                                },
                                 Err(e)=>{schedule_polled_at=Some(std::time::Instant::now());eprintln!("LOCAL_SCHEDULE_FAILED {e}");}
                             }
                         }
