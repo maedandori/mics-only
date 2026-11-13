@@ -30,7 +30,7 @@ fn main() {
     let get = |k:&str,d:&str| original.get(k).cloned().unwrap_or_else(||d.into());
 
     let mut window=nwg::Window::default();
-    nwg::Window::builder().size((790,875)).position((190,65))
+    nwg::Window::builder().size((790,790)).position((190,65))
         .title("MICS Only Settings / MICS 予備機設定")
         .build(&mut window).expect("Window error");
 
@@ -73,7 +73,7 @@ fn main() {
     ];
     let mut secret_labels=Vec::<nwg::Label>::new();
     for (index,name) in secret_names.iter().enumerate() {
-        let y=441+(index as i32)*50;
+        let y=417+(index as i32)*50;
         let mut label=nwg::Label::default();
         nwg::Label::builder().text(name).parent(&window).position((25,y))
             .size((305,28)).build(&mut label).unwrap();
@@ -91,49 +91,49 @@ fn main() {
         .map(|o|o.status.success()).unwrap_or(false);
     nwg::CheckBox::builder()
         .text("Start agent with Windows / Windows起動時に実行")
-        .parent(&window).position((25,591)).size((680,28))
+        .parent(&window).position((25,565)).size((680,28))
         .check_state(if startup_enabled {nwg::CheckBoxState::Checked}else{nwg::CheckBoxState::Unchecked})
         .build(&mut autostart).unwrap();
 
     let mut note=nwg::Label::default();
     nwg::Label::builder().text(
         "Blank secret fields retain DPAPI values. Tokens are separate from mics-print."
-    ).parent(&window).position((25,624)).size((735,25)).build(&mut note).unwrap();
+    ).parent(&window).position((25,594)).size((735,25)).build(&mut note).unwrap();
 
     let mut status=nwg::Label::default();
     nwg::Label::builder().text(if credentials::configured() {
         "Credentials: stored separately with Windows DPAPI"
     }else{
         "Credentials: not configured"
-    }).parent(&window).position((25,651)).size((735,25)).build(&mut status).unwrap();
+    }).parent(&window).position((25,621)).size((735,25)).build(&mut status).unwrap();
 
     let mut test=nwg::Button::default();
     nwg::Button::builder().text("Test Connection / 接続テスト").parent(&window)
-        .position((25,695)).size((190,36)).build(&mut test).unwrap();
+        .position((25,658)).size((190,36)).build(&mut test).unwrap();
     let mut open_web=nwg::Button::default();
     nwg::Button::builder().text("Open Local Web").parent(&window)
-        .position((230,695)).size((190,36)).build(&mut open_web).unwrap();
+        .position((230,658)).size((190,36)).build(&mut open_web).unwrap();
 
     // Agent management uses only mics-only.exe; printing processes stay untouched.
     let mut start_agent=nwg::Button::default();
     nwg::Button::builder().text("Start Agent / 起動").parent(&window)
-        .position((25,738)).size((155,36)).build(&mut start_agent).unwrap();
+        .position((25,704)).size((155,36)).build(&mut start_agent).unwrap();
     let mut stop_agent=nwg::Button::default();
     nwg::Button::builder().text("Stop Agent / 停止").parent(&window)
-        .position((190,738)).size((155,36)).build(&mut stop_agent).unwrap();
+        .position((190,704)).size((155,36)).build(&mut stop_agent).unwrap();
     let mut restart_agent=nwg::Button::default();
     nwg::Button::builder().text("Restart Agent / 再起動").parent(&window)
-        .position((355,738)).size((175,36)).build(&mut restart_agent).unwrap();
+        .position((355,704)).size((175,36)).build(&mut restart_agent).unwrap();
     let mut update_agent=nwg::Button::default();
     nwg::Button::builder().text("GitHub Update / 更新").parent(&window)
-        .position((540,738)).size((225,36)).build(&mut update_agent).unwrap();
+        .position((540,704)).size((225,36)).build(&mut update_agent).unwrap();
 
     let mut save=nwg::Button::default();
     nwg::Button::builder().text("Save / 保存").parent(&window)
-        .position((470,695)).size((140,36)).build(&mut save).unwrap();
+        .position((470,658)).size((140,36)).build(&mut save).unwrap();
     let mut close=nwg::Button::default();
     nwg::Button::builder().text("Close / 閉じる").parent(&window)
-        .position((620,695)).size((140,36)).build(&mut close).unwrap();
+        .position((620,658)).size((140,36)).build(&mut close).unwrap();
 
     let enable=Rc::new(enable);
     let autostart=Rc::new(autostart);
