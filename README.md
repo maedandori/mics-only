@@ -46,3 +46,13 @@ Open `mics-only-settings.exe` and click **Test Connection** (tests only the **sa
 CLI equivalent: `mics-only.exe --test-connection`.
 
 **Open Local Web** opens the browser at `http://127.0.0.1:8787/`. Save still restarts the agent. Only two EXEs remain.
+
+## Agent management and GitHub Release updates (v0.2.0)
+Settings now has **Start Agent**, **Stop Agent**, **Restart Agent**, and **GitHub Update** buttons.
+- Start launches only `mics-only.exe`. Stop terminates only the `mics-only.exe` process on this Windows computer. The printing agent is not touched.
+- Restart stops `mics-only.exe` and starts it with the saved settings. When stopped, the localhost web dashboard is also unavailable.
+- Stop does not disable **Start agent with Windows**; uncheck that setting and save to prevent startup on the next Windows sign-in.
+- **GitHub Update** queries `https://api.github.com/repos/maedandori/mics-only/releases/latest`, downloads `MICS-Only-Setup.exe` from the matching release if the local version differs, checks the published size, then opens the installer for user approval. There is no background auto-update.
+- GitHub Actions compiles and publishes versioned release `v0.2.0` only after the Windows build and installer steps succeed. Artifacts include the two executables and editable `www/`.
+- The installer preserves existing `mics.ini`, Windows DPAPI credentials and locally modified `www/` files. Remove or rename a modified asset if you intentionally want the newest default version installed.
+- No release or Windows build result has been verified solely by committing source code.
