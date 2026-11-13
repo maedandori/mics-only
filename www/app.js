@@ -26,6 +26,38 @@ function updateNgWarnings(machines){
   host.append(line);
  }
 }
+// Next change is identified from the saved schedule. ETA uses live remaining parts,
+// actual seconds/cycle and the robot pick count (parts/cycle), never planned cycle.
+function changePrediction(machine,rows,sampledAt){
+ const same=rows.filter(r=>Number(r.machine_no)===Number(machine.machine_no))
+  .sort((a,b)=>String(a.start_at||"").localeCompare(String(b.start_at||""))||
+   String(a.sequence||"").localeCompare(String(b.sequence||"")));
+ const orderNo=String(machine.order_no||"").trim();
+ const moldNo=String(machine.mold_no||"").trim();
+ let idx=orderNo?same.findIndex(r=>String(r.order_no||"").trim()===orderNo):-1;
+ if(idx<0&&moldNo)idx=same.findIndex(r=>String(r.mold_no||"").trim()===moldNo);
+ // Do not mistake an arbitrary future row for the current production order.
+ if(idx<0)return {type:"",text:"予定を確認",available:false};
+ let next=null,type="";
+ for(let i=idx+1;i<same.length;i++){
+  const candidate=classify(same[i-1],same[i]);
+  if(candidate==="color"||candidate==="mold"){next=same[i];type=candidate;break}
+ }
+ if(!next)return {type:"",text:"変更予定なし",available:false};
+ const label=type==="mold"?"型替え":"色替え";
+ const c=Number(machine.cycle_seconds),pick=Number(machine.pick_qty),remaining=Number(machine.qty_remaining);
+ const time=sampledAt?Date.parse(sampledAt):NaN;
+ const fresh=Number.isFinite(time)&&Math.abs(Date.now()-time)<=10*60*1000;
+ const active=["200","210"].includes(String(machine.status_code));
+ if(!fresh||!active||!Number.isFinite(c)||c<=0||!Number.isFinite(pick)||pick<=0||
+    !Number.isFinite(remaining)||remaining<0)
+  return {type,text:"予測不可",label,available:false};
+ const seconds=Math.ceil(remaining/pick)*c;
+ if(!Number.isFinite(seconds)||seconds>60*60*24*90)
+  return {type,text:"予測不可",label,available:false};
+ const eta=new Date(Date.now()+seconds*1000);
+ return {type,label,text:new Intl.DateTimeFormat("ja-JP",{timeZone:"Asia/Tokyo",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(eta),available:true};
+}
 function drawDashboard(){
  const map=new Map((current.machines||[]).map(m=>[Number(m.machine_no),m]));
  const format=v=>(Number(v)||0).toLocaleString("ja-JP");
@@ -39,6 +71,7 @@ function drawDashboard(){
   const pct=planned?Math.max(0,Math.min(100,100*good/planned)):0;
   const staff=m.staff_name||m.operator_name||"",cycle=m.cycle_seconds??"—",pick=m.pick_qty??"—";
   const statusLabel=has?(names[m.status_code]||m.status_name||m.status_code||"不明"):"データなし";
+  const prediction=has?changePrediction(m,Array.isArray(schedule.rows)?schedule.rows:[],current.sampled_at):{type:"",text:"—",available:false};
   return '<article class="node '+status(m.status_code,m.status_name)+'">'+
    '<div class="node-top"><span class="machine-number">'+n+'号機</span><span class="staff">'+(staff?'担当者: '+esc(staff):'')+'</span></div>'+
    '<div class="mold">'+esc(m.mold_name||m.mold_no||"—")+'</div>'+
@@ -49,6 +82,7 @@ function drawDashboard(){
    '<svg width="102" height="102" viewBox="0 0 102 102" aria-hidden="true"><circle class="track" cx="51" cy="51" r="42"/><circle class="arc" cx="51" cy="51" r="42" pathLength="100" stroke-dasharray="'+pct.toFixed(1)+' 100"/></svg>'+
    '<b>'+pct.toFixed(0)+'%</b><small>生産進捗</small></div></div>'+
    '<dl class="quantities">'+cell("予定数",planned)+cell("良品数",good)+cell("不良数",bad,bad>5)+cell("残数",remaining)+'</dl>'+
+   '<div class="next-change '+(prediction.type||"unknown")+'"><span>次の変更: <strong>'+(prediction.label||"—")+'</strong></span><span>変更予測: <strong>'+esc(prediction.text)+'</strong></span></div>'+
    '<span class="status">'+esc(statusLabel)+'</span><span class="status-code">'+esc(m.status_code??"")+'</span></article>';
  }).join("");
 }
