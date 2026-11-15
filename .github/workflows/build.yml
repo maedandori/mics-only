@@ -23,15 +23,15 @@ jobs:
       - name: Verify packaged Vue assets
         shell: pwsh
         run: |
-          if (!(Test-Path www/vue-v0.2.9/index.html)) { throw 'Vue index missing' }
+          if (!(Test-Path www/vue-v0.2.10/index.html)) { throw 'Vue index missing' }
           foreach ($page in @('change-schedule.html','status-colors.html','change-aliases.html')) {
-            if (!(Test-Path (Join-Path 'www/vue-v0.2.9' $page))) { throw "Original template page missing: $page" }
+            if (!(Test-Path (Join-Path 'www/vue-v0.2.10' $page))) { throw "Original template page missing: $page" }
           }
           foreach ($file in @('change-aliases.json','status-colors.json')) {
-            if (!(Test-Path (Join-Path 'www/vue-v0.2.9/data' $file))) { throw "Settings JSON missing: $file" }
+            if (!(Test-Path (Join-Path 'www/vue-v0.2.10/data' $file))) { throw "Settings JSON missing: $file" }
           }
-          if (!(Get-ChildItem www/vue-v0.2.9/assets -Filter '*.js')) { throw 'Vue JS asset missing' }
-          if (!(Get-ChildItem www/vue-v0.2.9/assets -Filter '*.css')) { throw 'Vue CSS asset missing' }
+          if (!(Get-ChildItem www/vue-v0.2.10/assets -Filter '*.js')) { throw 'Vue JS asset missing' }
+          if (!(Get-ChildItem www/vue-v0.2.10/assets -Filter '*.css')) { throw 'Vue CSS asset missing' }
       - name: Test Rust
         run: cargo test
       - name: Compile Windows EXEs
@@ -57,8 +57,8 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.2.9
-          name: MICS Only v0.2.9
+          tag_name: v0.2.10
+          name: MICS Only v0.2.10
           target_commitish: ${{ github.sha }}
           draft: false
           prerelease: false
