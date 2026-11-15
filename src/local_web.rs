@@ -104,6 +104,23 @@ fn load_www_file(name:&str)->Option<Vec<u8>>{
     fs::read(www_dir().join(name)).ok()
 }
 
+// An HTML file alone does not mean that the Vue app can boot. Check the
+// referenced Vite JS/CSS files before preferring it to the legacy dashboard.
+fn vue_bundle_ready(dir:&Path)->bool{
+    let Ok(index)=fs::read_to_string(dir.join("index.html")) else{return false};
+    let prefix=format!("/vue-v{}/",env!("CARGO_PKG_VERSION"));
+    let mut found=0usize;
+    for quoted in index.split(['"', '\'']) {
+        if let Some(relative)=quoted.strip_prefix(&prefix) {
+            if relative.starts_with("assets/") {
+                if relative.contains("..") || !dir.join(relative).is_file(){return false}
+                found+=1;
+            }
+        }
+    }
+    found>0
+}
+
 fn template_settings_file(state:&LocalState,route:&str)->Option<(PathBuf,&'static str)> {
     let name=match route {
         "/api/ui-template/aliases"=>"change-aliases.json",
@@ -276,7 +293,7 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     let vue_dir=www_dir().join(concat!("vue-v",env!("CARGO_PKG_VERSION")));
     let vue_entry=vue_dir.join("index.html");
 
-    if vue_entry.is_file() {
+    if vue_bundle_ready(&vue_dir) {
         let requested=if matches!(route,"/"|"/index.html"){
             Some(vue_entry.clone())
         }else if matches!(route,"/change-schedule.html"|"/status-colors.html"|"/change-aliases.html"){
