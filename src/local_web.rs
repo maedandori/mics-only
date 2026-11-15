@@ -1,6 +1,6 @@
 //! Loopback-only HTTP server. Never bind to a LAN/public interface.
 use serde_json::{json, Value};
-use std::{fs, io::{Read,Write}, net::{TcpListener,TcpStream}, path::{Path,PathBuf}, sync::{Arc,Mutex}, thread, time::Duration};
+use std::{fs, io::{Read,Write}, net::{TcpListener,TcpStream}, path::{Path,PathBuf}, sync::{Arc,Mutex}, thread, time::{Duration,Instant}};
 
 #[derive(Clone)]
 pub struct LocalState {
@@ -9,6 +9,8 @@ pub struct LocalState {
     pub data_path: PathBuf,
     pub sync_status: Arc<Mutex<String>>,
     pub last_sync_at: Arc<Mutex<Option<String>>>,
+    pub alias_cloud: Arc<Mutex<Option<(String,String)>>>,
+    pub alias_last_check: Arc<Mutex<Option<Instant>>>,
 }
 impl LocalState {
     pub fn new(data_path:PathBuf)->Self {
@@ -35,7 +37,15 @@ impl LocalState {
             .filter(|v|v.get("machines").and_then(Value::as_array).is_some())
             .unwrap_or_else(||json!({"source":"mics-only","machines":[],"sampled_at":null}));
         Self{snapshot:Arc::new(Mutex::new(initial)),mode:Arc::new(Mutex::new("STANDBY".into())),
-            sync_status:Arc::new(Mutex::new("NOT_SYNCED".into())),last_sync_at:Arc::new(Mutex::new(None)),data_path}
+            sync_status:Arc::new(Mutex::new("NOT_SYNCED".into())),last_sync_at:Arc::new(Mutex::new(None)),
+            alias_cloud:Arc::new(Mutex::new(None)),alias_last_check:Arc::new(Mutex::new(None)),data_path}
+    }
+    pub fn set_alias_sync(&self,coordinator_url:&str,token:&str){
+        if coordinator_url.starts_with("https://") && !token.is_empty(){
+            if let Ok(mut conn)=self.alias_cloud.lock(){
+                *conn=Some((format!("{}/aliases",coordinator_url.trim_end_matches('/')),token.to_owned()));
+            }
+        }
     }
     pub fn set_mode(&self,mode:&str) {
         if let Ok(mut m)=self.mode.lock(){*m=mode.to_owned()}
@@ -102,6 +112,54 @@ fn template_settings_file(state:&LocalState,route:&str)->Option<(PathBuf,&'stati
     };
     Some((state.data_path.with_file_name(name),name))
 }
+
+fn alias_cloud_credentials(state:&LocalState)->Option<(String,String)> {
+    state.alias_cloud.lock().ok().and_then(|c|c.clone())
+}
+fn fetch_cloud_alias(state:&LocalState) {
+    // Only a UI request triggers the 60-second refresh. No extra Firebird or
+    // machine snapshot request; agent coordinator heartbeat is unaffected.
+    let refresh=state.alias_last_check.lock().ok().map(|mut last|{
+        if last.as_ref().is_some_and(|t|t.elapsed()<Duration::from_secs(60)){false}
+        else{*last=Some(Instant::now());true}
+    }).unwrap_or(false);
+    if !refresh{return}
+    let Some((url,token))=alias_cloud_credentials(state) else{return};
+    let response=ureq::AgentBuilder::new().timeout(Duration::from_secs(6)).build()
+        .get(&url).set("Authorization",&format!("Bearer {token}")).call();
+    if let Ok(resp)=response{
+        let mut bytes=Vec::new();
+        let reader=resp.into_reader();
+        let _=reader.take(128*1024+1).read_to_end(&mut bytes);
+        if bytes.len()<=128*1024 && !bytes.is_empty(){
+            let path=state.data_path.with_file_name("change-aliases.json");
+            if fs::read(&path).ok().as_deref()!=Some(bytes.as_slice()){
+                let _=save_template_json(&path,&bytes,"change-aliases.json");
+            }
+        }
+    }
+}
+fn put_cloud_alias(state:&LocalState,body:&[u8])->Result<(),String>{
+    let (url,token)=alias_cloud_credentials(state)
+        .ok_or("Cloud alias sync not configured: save Coordinator Token in MICS-only Settings")?;
+    // Validate locally before sending. Cloudflare also validates the same schema.
+    let value:Value=serde_json::from_slice(body).map_err(|_|"Invalid alias JSON")?;
+    if !["color","mold","stamp"].iter().all(|kind|value.get(kind).and_then(Value::as_array).is_some())
+       {return Err("Invalid alias configuration".into())}
+    let result=ureq::AgentBuilder::new().timeout(Duration::from_secs(10)).build()
+        .put(&url).set("Authorization",&format!("Bearer {token}"))
+        .set("Content-Type","application/json").send_bytes(body);
+    match result{
+        Ok(resp) if resp.status()==200=>{
+            let path=state.data_path.with_file_name("change-aliases.json");
+            save_template_json(&path,body,"change-aliases.json")?;
+            if let Ok(mut last)=state.alias_last_check.lock(){*last=Some(Instant::now());}
+            Ok(())
+        }
+        Ok(resp)=>Err(format!("Cloudflare alias sync HTTP {}",resp.status())),
+        Err(e)=>Err(format!("Cloudflare alias sync unavailable: {e}"))
+    }
+}
 fn save_template_json(dest:&Path,bytes:&[u8],name:&str)->Result<(),String>{
     if bytes.len()>128*1024 || bytes.is_empty() {return Err("Invalid settings size".into())}
     let value:Value=serde_json::from_slice(bytes).map_err(|_|"Malformed JSON".to_string())?;
@@ -165,7 +223,9 @@ fn receive_template_json(stream:&mut TcpStream,first_bytes:&[u8],state:&LocalSta
     if body.len()<length {
         reply(stream,"400 Bad Request","text/plain",b"Incomplete request body","no-store");return
     }
-    let res=save_template_json(&file,&body[..length],name);
+    let res=if name=="change-aliases.json" {
+        put_cloud_alias(state,&body[..length])
+    }else{save_template_json(&file,&body[..length],name)};
     match res{
         Ok(())=>reply(stream,"200 OK","application/json; charset=utf-8",b"{\"ok\":true}","no-store"),
         Err(e)=>reply(stream,"400 Bad Request","text/plain",e.as_bytes(),"no-store")
@@ -201,6 +261,7 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
             receive_template_json(&mut stream,&buf[..n],state,route);
             return
         }
+        if name=="change-aliases.json"{fetch_cloud_alias(state);}
         let fallback=www_dir().join(concat!("vue-v",env!("CARGO_PKG_VERSION"))).join("data").join(name);
         let raw=fs::read(file).or_else(|_|fs::read(fallback)).unwrap_or_else(|_|b"{}".to_vec());
         reply(&mut stream,"200 OK","application/json; charset=utf-8",if method=="HEAD"{&[]}else{&raw},"no-store");
