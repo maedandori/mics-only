@@ -69,6 +69,7 @@ for(const page of ['index.html','change-schedule.html','status-colors.html','cha
  html=html.replace(/<script src="https:\/\/cdn\.tailwindcss\.com"><\/script>\s*/g,'');
  html=html.replace(/<script type="importmap">[\s\S]*?<\/script>\s*/g,'');
  html=html.replace(/<script src="data\/data\.js"><\/script>\s*/g,'');
+ html=html.replace(/<script src="data\/(?:status-colors|change-aliases)\.js"><\/script>\s*/g,'');
  html=html.replace('<link rel="stylesheet" href="css/tailwind-custom.css" />','<link rel="stylesheet" href="css/tailwind-generated.css" />\n  <link rel="stylesheet" href="css/tailwind-custom.css" />');
  writeFileSync(file,html);
 }
