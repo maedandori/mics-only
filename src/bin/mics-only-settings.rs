@@ -6,7 +6,7 @@
 #[cfg(windows)]
 fn main() {
     use native_windows_gui as nwg;
-    use std::{cell::RefCell, collections::BTreeMap, fs, path::PathBuf, process::Command, rc::Rc};
+    use std::{cell::RefCell, collections::BTreeMap, fs, path::PathBuf, process::Command, rc::Rc, sync::mpsc, thread};
     use std::os::windows::process::CommandExt;
     nwg::init().expect("Cannot initialize Windows GUI");
     nwg::Font::set_global_family("Segoe UI").expect("Font error");
@@ -32,7 +32,7 @@ fn main() {
     let get = |k:&str,d:&str| original.get(k).cloned().unwrap_or_else(||d.into());
 
     let mut window=nwg::Window::default();
-    nwg::Window::builder().size((790,790)).position((190,65))
+    nwg::Window::builder().size((790,855)).position((190,65))
         .title("MICS Only Settings / MICS 予備機設定")
         .build(&mut window).expect("Window error");
 
@@ -145,6 +145,19 @@ fn main() {
     nwg::Button::builder().text("Close / 閉じる").parent(&window)
         .position((620,658)).size((140,36)).build(&mut close).unwrap();
 
+    // Update downloading runs off the UI thread so the progress bar stays responsive.
+    let mut update_text=nwg::Label::default();
+    nwg::Label::builder().text("Update: idle / 更新待機").parent(&window)
+        .position((25,753)).size((735,24)).build(&mut update_text).unwrap();
+    let mut update_bar=nwg::ProgressBar::default();
+    nwg::ProgressBar::builder().parent(&window).position((25,782))
+        .size((735,23)).range(0..100).pos(0).build(&mut update_bar).unwrap();
+    let mut update_notice=nwg::Notice::default();
+    nwg::Notice::builder().parent(&window).build(&mut update_notice).unwrap();
+    let (update_sender,update_receiver)=mpsc::channel::<(u32,String,Option<Result<String,String>>)>();
+    let update_receiver=Rc::new(RefCell::new(update_receiver));
+    let update_sender=Rc::new(update_sender);
+
     let enable=Rc::new(enable);
     let autostart=Rc::new(autostart);
     let test=Rc::new(test);
@@ -175,11 +188,38 @@ fn main() {
         let update_agent=update_agent.clone();
         let save=save.clone();
         let close=close.clone();
+        let update_sender=update_sender.clone();
+        let update_receiver=update_receiver.clone();
+        let update_notice_sender=update_notice.sender();
+        let update_notice_handle=update_notice.handle.clone();
+        let update_text=Rc::new(update_text);
+        let update_bar=Rc::new(update_bar);
+        let update_text_ui=update_text.clone();
+        let update_bar_ui=update_bar.clone();
         let ini=ini.clone();
         let agent_exe=home.join("mics-only.exe");
         move |event,_,handle| {
             if event==nwg::Event::OnWindowClose {
                 nwg::stop_thread_dispatch();
+            }
+            if event==nwg::Event::OnNotice && handle==update_notice_handle {
+                while let Ok((percent,message,done))=update_receiver.borrow().try_recv() {
+                    update_bar_ui.set_pos(percent);
+                    update_text_ui.set_text(&format!("Update: {percent}% - {message}"));
+                    if let Some(result)=done {
+                        update_agent.set_enabled(true);
+                        match result {
+                            Ok(summary)=>{
+                                if summary.starts_with("UPDATE_STAGED ") {
+                                    nwg::simple_message("GitHub Update",&format!("{summary}\nThe installer continues after Settings closes. Check data\\update.log for install/rollback result."));
+                                    nwg::stop_thread_dispatch();
+                                }else{nwg::simple_message("GitHub Update",&summary);}
+                            },
+                            Err(error)=>{update_text_ui.set_text("Update failed / 更新失敗");nwg::error_message("GitHub Update",&error);}
+                        }
+                    }
+                }
+                return
             }
             if event!=nwg::Event::OnButtonClick {return}
             if handle==close.handle {nwg::stop_thread_dispatch();return}
@@ -229,10 +269,20 @@ fn main() {
                 return
             }
             if handle==update_agent.handle {
-                match github_update(&agent_exe) {
-                    Ok(result)=>{nwg::simple_message("GitHub Update",&result);if result.starts_with("UPDATE_STAGED "){nwg::stop_thread_dispatch();}},
-                    Err(e)=>{nwg::error_message("GitHub Update",&e);}
-                }
+                update_agent.set_enabled(false);
+                update_bar_ui.set_pos(1);
+                update_text_ui.set_text("Update: 1% - Starting GitHub check");
+                let tx=update_sender.as_ref().clone();
+                let sender=update_notice_sender.clone();
+                let exe=agent_exe.clone();
+                thread::spawn(move || {
+                    let outcome=updater::install_with_progress(&exe,|pct,msg|{
+                        let _=tx.send((pct,msg.to_string(),None));
+                        sender.notice();
+                    });
+                    let _=tx.send((100,"Finished download check".to_string(),Some(outcome)));
+                    sender.notice();
+                });
                 return
             }
             if handle!=save.handle{return}
@@ -330,7 +380,7 @@ fn main() {
         }
     });
     // Keep window-owned controls alive for the duration of the event loop.
-    let _controls=(heading,labels,secret_labels,note,status,test,open_web,start_agent,stop_agent,restart_agent,update_agent,save,close,enable,autostart,state);
+    let _controls=(heading,labels,secret_labels,note,status,test,open_web,start_agent,stop_agent,restart_agent,update_agent,save,close,enable,autostart,state,update_notice,update_text,update_bar);
     nwg::dispatch_thread_events();
 }
 #[cfg(not(windows))]
@@ -338,7 +388,3 @@ fn main() {
     eprintln!("MICS Only Settings requires Windows.");
 }
 
-#[cfg(windows)]
-fn github_update(agent_exe:&std::path::Path)->Result<String,String>{
-    updater::install_if_available(agent_exe)
-}
