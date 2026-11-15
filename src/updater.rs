@@ -40,11 +40,17 @@ fn release()->Result<Option<(String,String,u64,Option<String>)>,String>{
  Ok(Some((tag.to_owned(),url.to_owned(),size,digest)))
 }
 pub fn install_if_available(exe:&Path)->Result<String,String>{
+ install_with_progress(exe,|_,_|{})
+}
+pub fn install_with_progress(exe:&Path,mut progress:impl FnMut(u32,&str))->Result<String,String>{
+ progress(2,"Checking GitHub Release");
  if UPDATER_BUSY.swap(true,Ordering::SeqCst){return Err("Update already running".into())}
  let _unlock=Unlock;
  let Some((tag,url,size,digest))=release()? else{
+  progress(100,"Already up to date");
   return Ok(format!("Already up to date (v{}).",env!("CARGO_PKG_VERSION")))
  };
+ progress(10,"Release found; preparing download");
  let folder=exe.parent().ok_or("Cannot find installation directory")?;
  let blocked=folder.join("data").join("update-blocked-version.txt");
  if fs::read_to_string(blocked).ok().is_some_and(|v|v.trim()==tag){
@@ -60,20 +66,25 @@ pub fn install_if_available(exe:&Path)->Result<String,String>{
  let mut reader=response.into_reader().take(120_000_001);
  let mut hasher=Sha256::new();
  let mut total=0u64;
+ let mut last_percent=0u32;
  let mut buffer=[0u8;65536];
  loop{
   let n=reader.read(&mut buffer).map_err(|e|e.to_string())?;
   if n==0{break}
   dst.write_all(&buffer[..n]).map_err(|e|e.to_string())?;
   hasher.update(&buffer[..n]);total+=n as u64;
+  let percent=10+((total.saturating_mul(75)/size).min(75)) as u32;
+  if percent>last_percent { last_percent=percent; progress(percent,"Downloading release ZIP"); }
  }
  dst.flush().map_err(|e|e.to_string())?;
+ progress(87,"Checking download size and SHA256");
  if total!=size{return Err("Release ZIP size mismatch".into())}
  if let Some(expected)=digest{
   if !format!("{:x}",hasher.finalize()).eq_ignore_ascii_case(&expected){
    return Err("Release ZIP SHA256 mismatch".into())
   }
  }
+ progress(94,"Download verified; preparing rollback updater");
  let script=dir.join("apply-update.ps1");
  fs::write(&script,include_str!("../scripts/apply-update.ps1")).map_err(|e|e.to_string())?;
  Command::new("powershell.exe")
@@ -83,6 +94,7 @@ pub fn install_if_available(exe:&Path)->Result<String,String>{
   .arg("-Version").arg(&tag)
   .creation_flags(CREATE_NO_WINDOW).spawn()
   .map_err(|e|format!("Cannot start update helper: {e}"))?;
+ progress(100,"Package ready; Settings will close to install");
  Ok(format!("UPDATE_STAGED {tag}; closing parent to apply and verify, rollback on failure"))
 }
 
