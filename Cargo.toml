@@ -13,7 +13,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 url = "2"
 
 [target.'cfg(windows)'.dependencies]
-native-windows-gui = { version = "1.0", features = ["message-window", "menu", "cursor"] }
+native-windows-gui = { version = "1.0", features = ["message-window", "menu", "cursor", "notice", "progress-bar"] }
 
 [profile.release]
 opt-level = "z"
