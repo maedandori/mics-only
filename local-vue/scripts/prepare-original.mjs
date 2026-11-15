@@ -60,10 +60,47 @@ const localLoader=`export async function loadData() {
 
 `;
 common=common.slice(0,start)+localLoader+common.slice(end);
+
+// D1 is authoritative: never display an unsynchronized alias edit as saved.
+// Keep original layout/UI, only change the persistence behavior.
+const saveStart=common.indexOf('export async function saveAliasConfig(cfg) {');
+const saveEnd=common.indexOf('export async function resetAliasConfig()',saveStart);
+if(saveStart<0||saveEnd<0)throw Error('Original alias save helper not found');
+const cloudSave=`export async function saveAliasConfig(cfg) {
+  const normalized=normalizeAliasConfig(cfg);
+  let response;
+  try {
+    response=await fetch(ALIASES_JSON_URL,{
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(normalized),
+    });
+    if(!response.ok)throw new Error('Cloudflare D1 sync HTTP '+response.status);
+    if(typeof globalThis.window!=='undefined')globalThis.window.MICS_CHANGE_ALIASES=normalized;
+    const ls=getStorage();
+    try{if(ls)ls.setItem(LS_ALIASES,JSON.stringify(normalized))}catch{}
+    return {savedToFile:true,path:'Cloudflare D1 (all machines)',cfg:normalized};
+  } catch(e){
+    console.warn('D1 alias sync failed',e);
+    return {savedToFile:false,path:'Cloudflare D1',error:e.message,cfg:normalized};
+  }
+}
+
+`;
+common=common.slice(0,saveStart)+cloudSave+common.slice(saveEnd);
+
 common=common.replace("export const ALIASES_JSON_URL = '/api/ui-template/aliases';","export const ALIASES_JSON_URL = '/api/ui-template/aliases';");
 common=common.replace("export const STATUS_JSON_URL = '/api/ui-template/status-colors';","export const STATUS_JSON_URL = '/api/ui-template/status-colors';");
 common=common.replaceAll('Machine-Control D1 JSON','MICS-only local JSON');
 writeFileSync(commonPath,common);
+
+const aliasAppPath=resolve(root,'js/change-aliases-app.js');
+let aliasApp=readFileSync(aliasAppPath,'utf8');
+aliasApp=aliasApp.replace(
+  "if (msg) pushToast(res.savedToFile ? \`\${msg} (change-aliases.json に保存)\` : msg, 'ok');",
+  "if (msg) pushToast(res.savedToFile ? \`\${msg} (Cloudflare D1 全端末に同期)\` : \`D1同期失敗: \${res.error || res.status || '通信エラー'}\`, res.savedToFile ? 'ok' : 'error');"
+);
+writeFileSync(aliasAppPath,aliasApp);
+
 for(const page of ['index.html','change-schedule.html','status-colors.html','change-aliases.html']){
  const file=resolve(root,page);let html=readFileSync(file,'utf8');
  html=html.replace(/<script src="https:\/\/cdn\.tailwindcss\.com"><\/script>\s*/g,'');
