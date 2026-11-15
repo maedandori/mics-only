@@ -238,6 +238,13 @@ fn remote_update_request(response:&Value,local:&local_web::LocalState){
 fn run(c: Config) -> Result<(), String> {
     // Always serve the local dashboard, even when standby is disabled or lease denied.
     let local=local_web::LocalState::new(local_web::default_snapshot_path());
+    // Alias settings use shared D1; local machine/schedule API remains entirely local.
+    // The coordinator secret is read from DPAPI and never exposed to browser JS.
+    #[cfg(windows)]
+    let alias_token=credentials::load().ok().map(|v|v.coordinator_token).unwrap_or_default();
+    #[cfg(not(windows))]
+    let alias_token=env::var("MICS_COORDINATOR_TOKEN").unwrap_or_default();
+    local.set_alias_sync(&c.coordinator_url,&alias_token);
     local_web::start(local.clone())?;
     // Check GitHub every six hours; postpone while ACTIVE (Firebird lease holder).
     // Update applies only to this standby agent; the independent print agent is untouched.
