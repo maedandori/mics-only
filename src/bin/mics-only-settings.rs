@@ -157,6 +157,8 @@ fn main() {
     let (update_sender,update_receiver)=mpsc::channel::<(u32,String,Option<Result<String,String>>)>();
     let update_receiver=Rc::new(RefCell::new(update_receiver));
     let update_sender=Rc::new(update_sender);
+    let update_text=Rc::new(update_text);
+    let update_bar=Rc::new(update_bar);
 
     let enable=Rc::new(enable);
     let autostart=Rc::new(autostart);
@@ -192,8 +194,6 @@ fn main() {
         let update_receiver=update_receiver.clone();
         let update_notice_sender=update_notice.sender();
         let update_notice_handle=update_notice.handle.clone();
-        let update_text=Rc::new(update_text);
-        let update_bar=Rc::new(update_bar);
         let update_text_ui=update_text.clone();
         let update_bar_ui=update_bar.clone();
         let ini=ini.clone();
