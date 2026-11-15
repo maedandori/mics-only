@@ -28,7 +28,9 @@ try {
   if(!(Test-Path -LiteralPath $Archive)){throw 'Release ZIP missing'}
   if((Get-Item -LiteralPath $Archive).Length -gt 120MB){throw 'ZIP too large'}
   New-Item -ItemType Directory -Path $stage -Force | Out-Null
+  Log 'UPDATE_STAGE 10 Extracting archive'
   Expand-Archive -LiteralPath $Archive -DestinationPath $stage -Force
+  Log 'UPDATE_STAGE 25 Archive extracted'
   foreach($name in $names){if(!(Test-Path -LiteralPath (Join-Path $stage $name))){throw "Missing $name"}}
   if($ParentId -gt 0){
     try{Wait-Process -Id $ParentId -Timeout 75 -ErrorAction Stop}catch{
@@ -41,6 +43,7 @@ try {
   if($status -and $status.mode -eq 'ACTIVE'){throw 'ACTIVE agent, update postponed'}
   if($ParentId -eq 0 -and (!$status -or !$status.ok)){throw 'Agent status unavailable, update postponed'}
   # Settings invocation may leave agent running. Stop only mics-only by name.
+  Log 'UPDATE_STAGE 35 Stopping standby agent'
   Get-Process -Name 'mics-only' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction Stop
   Start-Sleep -Milliseconds 700
   New-Item -ItemType Directory -Path $backup -Force | Out-Null
@@ -49,8 +52,10 @@ try {
     if(!(Test-Path -LiteralPath $src)){throw "Current $name missing"}
     Copy-Item -LiteralPath $src -Destination (Join-Path $backup $name) -Force
   }
+  Log 'UPDATE_STAGE 45 Both executables backed up'
   $replacementStarted=$true
   foreach($name in $names){Copy-Item -LiteralPath (Join-Path $stage $name) -Destination (Join-Path $Target $name) -Force}
+  Log 'UPDATE_STAGE 60 New executables installed'
   # Install the versioned Vue files alongside legacy WWW. Existing configurations
   # and custom legacy files are never overwritten.
   $vueName='vue-'+$Version
@@ -62,6 +67,14 @@ try {
   Copy-Item -LiteralPath $vueSrc -Destination $vueDest -Recurse -Force
   $vueIndex=Get-Content -LiteralPath (Join-Path $vueDest 'index.html') -Raw
   if($vueIndex -notmatch 'assets/'){throw 'Vue asset paths missing'}
+  # Verify every referenced JS/CSS asset, not just the Vue index.html.
+  $assetRefs=[regex]::Matches($vueIndex, '(?:src|href)="/vue-[^"/]+/(assets/[^"?]+)"')
+  if($assetRefs.Count -eq 0){throw 'Vue JS/CSS references missing'}
+  foreach($assetRef in $assetRefs){
+    $relative=$assetRef.Groups[1].Value
+    if($relative.Contains('..') -or !(Test-Path -LiteralPath (Join-Path $vueDest $relative))){throw "Vue asset missing: $relative"}
+  }
+  Log 'UPDATE_STAGE 75 Vue assets verified'
   $process=Start-Process -FilePath (Join-Path $Target 'mics-only.exe') -WorkingDirectory $Target -PassThru
   $healthy=$false
   for($i=0;$i -lt 25;$i++){
@@ -73,9 +86,11 @@ try {
     }catch{}
   }
   if(!$healthy){throw 'New agent health/version check failed'}
+  Log 'UPDATE_STAGE 90 Agent API health verified'
   $page=Invoke-WebRequest -Uri 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 4
   if($page.StatusCode -ne 200 -or $page.Content -notlike ('*'+$vueName+'/*')){throw 'Vue local web health check failed'}
   Remove-Item -LiteralPath (Join-Path $Target 'data\update-blocked-version.txt') -Force -ErrorAction SilentlyContinue
+  Log "UPDATE_STAGE 100 Local web verified"
   Log "UPDATE_SUCCESS $Version"
   # Keep backup until next successful update, for emergency manual recovery.
 }catch{
