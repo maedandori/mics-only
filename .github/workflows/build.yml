@@ -24,6 +24,12 @@ jobs:
         shell: pwsh
         run: |
           if (!(Test-Path www/vue-v0.2.9/index.html)) { throw 'Vue index missing' }
+          foreach ($page in @('change-schedule.html','status-colors.html','change-aliases.html')) {
+            if (!(Test-Path (Join-Path 'www/vue-v0.2.9' $page))) { throw "Original template page missing: $page" }
+          }
+          foreach ($file in @('change-aliases.json','status-colors.json')) {
+            if (!(Test-Path (Join-Path 'www/vue-v0.2.9/data' $file))) { throw "Settings JSON missing: $file" }
+          }
           if (!(Get-ChildItem www/vue-v0.2.9/assets -Filter '*.js')) { throw 'Vue JS asset missing' }
           if (!(Get-ChildItem www/vue-v0.2.9/assets -Filter '*.css')) { throw 'Vue CSS asset missing' }
       - name: Test Rust
