@@ -82,7 +82,7 @@ impl LocalState {
     }
 }
 fn reply(stream:&mut TcpStream,status:&str,kind:&str,body:&[u8],cache:&str){
-    let headers=format!("HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: {cache}\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nContent-Security-Policy: default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'\r\nConnection: close\r\n\r\n",body.len());
+    let headers=format!("HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: {cache}\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nContent-Security-Policy: default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'\r\nConnection: close\r\n\r\n",body.len());
     let _=stream.write_all(headers.as_bytes());let _=stream.write_all(body);
 }
 fn www_dir()->PathBuf{
@@ -93,6 +93,85 @@ fn load_www_file(name:&str)->Option<Vec<u8>>{
     // Paths are static constants passed from the router, never user-provided.
     fs::read(www_dir().join(name)).ok()
 }
+
+fn template_settings_file(state:&LocalState,route:&str)->Option<(PathBuf,&'static str)> {
+    let name=match route {
+        "/api/ui-template/aliases"=>"change-aliases.json",
+        "/api/ui-template/status-colors"=>"status-colors.json",
+        _=>return None
+    };
+    Some((state.data_path.with_file_name(name),name))
+}
+fn save_template_json(dest:&Path,bytes:&[u8],name:&str)->Result<(),String>{
+    if bytes.len()>128*1024 || bytes.is_empty() {return Err("Invalid settings size".into())}
+    let value:Value=serde_json::from_slice(bytes).map_err(|_|"Malformed JSON".to_string())?;
+    let valid=if name=="change-aliases.json" {
+        ["color","mold","stamp"].iter().all(|kind|{
+            value.get(kind).and_then(Value::as_array).is_some_and(|a|
+                a.len()<=200 && a.iter().all(|r|{
+                    r.get("canonical").and_then(Value::as_str).is_some_and(|v|v.len()<=200) &&
+                    r.get("aliases").and_then(Value::as_array).is_some_and(|b|b.len()<=100 &&
+                        b.iter().all(|v|v.as_str().is_some_and(|s|s.len()<=200)))
+                }))
+        })
+    } else {
+        value.get("default").and_then(Value::as_object).is_some() &&
+        value.get("codes").and_then(Value::as_object).is_some_and(|m|m.len()<=250)
+    };
+    if !valid{return Err("Invalid JSON settings schema".into())}
+    if let Some(parent)=dest.parent(){fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
+    let next=dest.with_extension("tmp");
+    fs::write(&next,bytes).map_err(|e|e.to_string())?;
+    let backup=dest.with_extension("json.bak");
+    if dest.exists(){
+        let _=fs::remove_file(&backup);
+        fs::rename(dest,&backup).map_err(|e|e.to_string())?;
+    }
+    if let Err(e)=fs::rename(&next,dest){
+        if backup.exists(){let _=fs::rename(&backup,dest);}
+        return Err(e.to_string())
+    }
+    Ok(())
+}
+fn receive_template_json(stream:&mut TcpStream,first_bytes:&[u8],state:&LocalState,route:&str) {
+    let Some((file,name))=template_settings_file(state,route) else {return};
+    let Some(split)=first_bytes.windows(4).position(|w|w==b"\r\n\r\n") else {
+        reply(stream,"400 Bad Request","text/plain",b"Malformed headers","no-store");return
+    };
+    let header=String::from_utf8_lossy(&first_bytes[..split]);
+    // Same-origin requests only; Host must already be validated by serve().
+    if let Some(origin)=header.lines().find_map(|l|l.split_once(':').and_then(|(k,v)|
+        k.eq_ignore_ascii_case("Origin").then_some(v.trim().to_ascii_lowercase()))) {
+        if !["http://127.0.0.1:8787","http://localhost:8787"].contains(&origin.as_str()){
+            reply(stream,"403 Forbidden","text/plain",b"Origin rejected","no-store");return
+        }
+    }
+    let length=header.lines().find_map(|l|l.split_once(':').and_then(|(k,v)|
+        k.eq_ignore_ascii_case("Content-Length").then(||v.trim().parse::<usize>().ok()).flatten()));
+    let Some(length)=length else {
+        reply(stream,"411 Length Required","text/plain",b"Content-Length required","no-store");return
+    };
+    if length>128*1024{
+        reply(stream,"413 Payload Too Large","text/plain",b"JSON too large","no-store");return
+    }
+    let mut body=first_bytes[split+4..].to_vec();
+    let mut chunk=[0u8;8192];
+    while body.len()<length {
+        match stream.read(&mut chunk){
+            Ok(0)|Err(_)=>break,
+            Ok(n)=>body.extend_from_slice(&chunk[..n])
+        }
+    }
+    if body.len()<length {
+        reply(stream,"400 Bad Request","text/plain",b"Incomplete request body","no-store");return
+    }
+    let res=save_template_json(&file,&body[..length],name);
+    match res{
+        Ok(())=>reply(stream,"200 OK","application/json; charset=utf-8",b"{\"ok\":true}","no-store"),
+        Err(e)=>reply(stream,"400 Bad Request","text/plain",e.as_bytes(),"no-store")
+    }
+}
+
 fn serve(mut stream:TcpStream,state:&LocalState) {
     let _=stream.set_read_timeout(Some(Duration::from_secs(3)));
     let _=stream.set_write_timeout(Some(Duration::from_secs(3)));
@@ -103,7 +182,7 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     let mut fields=first.split_ascii_whitespace();
     let method=fields.next().unwrap_or("");
     let path=fields.next().unwrap_or("");
-    if method!="GET"&&method!="HEAD" {
+    if method!="GET"&&method!="HEAD"&&method!="PUT" {
         reply(&mut stream,"405 Method Not Allowed","text/plain",b"GET only","no-store");return
     }
     // Loopback binding protects network access. Host validation additionally
@@ -115,32 +194,52 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     if !matches!(host.as_str(),"127.0.0.1:8787"|"localhost:8787"|"[::1]:8787") {
         reply(&mut stream,"403 Forbidden","text/plain",b"Localhost only","no-store");return
     }
+
+    let route=path.split('?').next().unwrap_or("");
+    if let Some((file,name))=template_settings_file(state,route){
+        if method=="PUT"{
+            receive_template_json(&mut stream,&buf[..n],state,route);
+            return
+        }
+        let fallback=www_dir().join(concat!("vue-v",env!("CARGO_PKG_VERSION"))).join("data").join(name);
+        let raw=fs::read(file).or_else(|_|fs::read(fallback)).unwrap_or_else(|_|b"{}".to_vec());
+        reply(&mut stream,"200 OK","application/json; charset=utf-8",if method=="HEAD"{&[]}else{&raw},"no-store");
+        return
+    }
+    if method=="PUT"{
+        reply(&mut stream,"405 Method Not Allowed","text/plain",b"PUT only for JSON settings","no-store");return
+    }
     // Versioned Vue bundle. The v0.2.5 updater preserves existing www files:
     // a new versioned directory is copied without replacing the legacy UI.
     let route=path.split('?').next().unwrap_or("");
     let vue_dir=www_dir().join(concat!("vue-v",env!("CARGO_PKG_VERSION")));
     let vue_entry=vue_dir.join("index.html");
+
     if vue_entry.is_file() {
-        let requested=if route=="/"||route=="/index.html" {
+        let requested=if matches!(route,"/"|"/index.html"){
             Some(vue_entry.clone())
-        } else if route.starts_with(concat!("/vue-v",env!("CARGO_PKG_VERSION"),"/")) {
+        }else if matches!(route,"/change-schedule.html"|"/status-colors.html"|"/change-aliases.html"){
+            Some(vue_dir.join(route.trim_start_matches('/')))
+        }else if route.starts_with(concat!("/vue-v",env!("CARGO_PKG_VERSION"),"/")){
             let relative=route.trim_start_matches('/').strip_prefix(concat!("vue-v",env!("CARGO_PKG_VERSION"),"/")).unwrap_or("");
-            // Restrict reads to flat asset names; prevent traversal and encoded separators.
-            if relative.starts_with("assets/") && relative.len()<200 &&
+            if relative.len()<220 && !relative.is_empty() &&
                 relative.bytes().all(|b|b.is_ascii_alphanumeric()||b"-_./".contains(&b)) &&
-                !relative.contains("..") && !relative.contains("//") {
+                !relative.contains("..") && !relative.contains("//") &&
+                (relative.starts_with("assets/") || relative.starts_with("data/") ||
+                 matches!(relative,"index.html"|"change-schedule.html"|"status-colors.html"|"change-aliases.html")) {
                 Some(vue_dir.join(relative))
-            } else {None}
-        } else {None};
-        if let Some(file)=requested {
+            }else{None}
+        }else{None};
+        if let Some(file)=requested{
             let kind=if route.ends_with(".js") {"application/javascript; charset=utf-8"}
-                 else if route.ends_with(".css") {"text/css; charset=utf-8"}
-                 else {"text/html; charset=utf-8"};
+                else if route.ends_with(".css") {"text/css; charset=utf-8"}
+                else if route.ends_with(".json") {"application/json; charset=utf-8"}
+                else {"text/html; charset=utf-8"};
             let found=fs::read(file).ok();
             let is_found=found.is_some();
             let body=found.unwrap_or_default();
             reply(&mut stream,if is_found{"200 OK"}else{"404 Not Found"},kind,
-                  if method=="HEAD"{&[]}else{&body},"no-cache");
+                if method=="HEAD"{&[]}else{&body},"no-cache");
             return
         }
     }
