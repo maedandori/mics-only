@@ -15,6 +15,12 @@ function Log([string]$message){
 }
 function Restore {
   Log 'ROLLBACK_BEGIN'
+  $webBackup=Join-Path $backup 'www'
+  if(Test-Path -LiteralPath $webBackup){
+    foreach($file in (Get-ChildItem -LiteralPath $webBackup -File)){
+      Copy-Item -LiteralPath $file.FullName -Destination (Join-Path (Join-Path $Target 'www') $file.Name) -Force
+    }
+  }
   foreach($name in $names){
     $old=Join-Path $backup $name
     $dest=Join-Path $Target $name
@@ -74,7 +80,18 @@ try {
     $relative=$assetRef.Groups[1].Value
     if($relative.Contains('..') -or !(Test-Path -LiteralPath (Join-Path $vueDest $relative))){throw "Vue asset missing: $relative"}
   }
-  Log 'UPDATE_STAGE 75 Vue assets verified'
+  # Legacy HTML/CSS/JS is the default UI. Ship the exact files used by this
+  # release, while retaining a backup for rollback.
+  foreach($name in @('index.html','app.js','style.css','sw.js','manifest.webmanifest','icon.svg','vue-diagnostics.js')){
+    $source=Join-Path (Join-Path $stage 'www') $name
+    if(!(Test-Path -LiteralPath $source)){throw "Legacy web file missing: $name"}
+    $destination=Join-Path (Join-Path $Target 'www') $name
+    $legacyBackup=Join-Path $backup 'www'
+    New-Item -ItemType Directory -Path $legacyBackup -Force | Out-Null
+    if(Test-Path -LiteralPath $destination){Copy-Item -LiteralPath $destination -Destination (Join-Path $legacyBackup $name) -Force}
+    Copy-Item -LiteralPath $source -Destination $destination -Force
+  }
+  Log 'UPDATE_STAGE 75 Legacy HTML and Vue resources verified'
   $process=Start-Process -FilePath (Join-Path $Target 'mics-only.exe') -WorkingDirectory $Target -PassThru
   $healthy=$false
   for($i=0;$i -lt 25;$i++){
@@ -88,7 +105,11 @@ try {
   if(!$healthy){throw 'New agent health/version check failed'}
   Log 'UPDATE_STAGE 90 Agent API health verified'
   $page=Invoke-WebRequest -Uri 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 4
-  if($page.StatusCode -ne 200 -or $page.Content -notlike ('*'+$vueName+'/*')){throw 'Vue local web health check failed'}
+  if($page.StatusCode -ne 200 -or $page.Content -notlike '*id="machines"*' -or $page.Content -notlike '*src="/app.js"*'){
+    throw 'Legacy local dashboard health check failed'
+  }
+  $scriptCheck=Invoke-WebRequest -Uri 'http://127.0.0.1:8787/app.js' -UseBasicParsing -TimeoutSec 4
+  if($scriptCheck.StatusCode -ne 200 -or $scriptCheck.Content.Length -lt 100){throw 'Legacy app.js unavailable'}
   Remove-Item -LiteralPath (Join-Path $Target 'data\update-blocked-version.txt') -Force -ErrorAction SilentlyContinue
   Log "UPDATE_STAGE 100 Local web verified"
   Log "UPDATE_SUCCESS $Version"
