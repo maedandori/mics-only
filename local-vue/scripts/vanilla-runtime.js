@@ -40,7 +40,10 @@ function children(nodes,ctx,app,path,slot){const out=document.createDocumentFrag
   if(node.hasAttribute('v-else-if')||node.hasAttribute('v-else'))continue;
   if(node.hasAttribute('v-if')){
    const group=[node];let j=i+1;
-   for(;j<all.length;j++){let n=all[j];if(n.nodeType===3&&!n.textContent.trim())continue;
+   for(;j<all.length;j++){let n=all[j];
+    // HTML comments between v-if / v-else-if are whitespace in the original
+    // template. They must not terminate the conditional chain.
+    if(n.nodeType===8||(n.nodeType===3&&!n.textContent.trim()))continue;
     if(n.nodeType===1&&(n.hasAttribute('v-else-if')||n.hasAttribute('v-else'))){group.push(n);continue}break}
    const selected=group.find(n=>n.hasAttribute('v-else')||Boolean(evaluate(n.getAttribute('v-if')||n.getAttribute('v-else-if'),ctx)));
    if(selected){const copy=selected.cloneNode(true);for(const k of ['v-if','v-else-if','v-else'])copy.removeAttribute(k);out.appendChild(render(copy,ctx,app,path+'/'+i,slot))}
@@ -70,6 +73,13 @@ function render(node,ctx,app,path,slot){
  if(component){
   const props={};for(const a of node.attributes){if(a.name.startsWith(':'))props[camel(a.name.slice(1))]=evaluate(a.value,ctx);
    else if(!a.name.startsWith('@')&&!a.name.startsWith('v-'))props[camel(a.name)]=a.value;}
+  // Native components need the same declared default props as the original
+  // template; otherwise omitted values such as AppShell.narrow are undefined.
+  for(const [key,spec] of Object.entries(component.props||{})){
+   if(!(key in props)&&spec&&Object.prototype.hasOwnProperty.call(spec,'default')){
+    props[key]=typeof spec.default==='function'&&spec.type!==Function?spec.default():spec.default;
+   }
+  }
   const slotNode=Array.from(node.children).find(n=>n.hasAttribute('#default'));
   const slotInfo={nodes:slotNode?(slotNode.content?.childNodes||slotNode.childNodes):node.childNodes,vars:slotNode?.getAttribute('#default')||'{}',ctx};
   let instance=app.instances.get(path);

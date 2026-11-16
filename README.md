@@ -169,3 +169,6 @@ The versioned directory name `vue-v0.2.20` remains **only as a compatibility
 path** so updater scripts embedded in prior 0.2.x EXEs can copy the files.
 The website does not load Vue. Releases are checked on Windows by GitHub Actions
 before publishing; the workflow is limited to one active release build.
+
+### v0.2.21 conditional-chain fix
+The original template inserts HTML comments between `v-if` and `v-else-if` branches. The vanilla renderer now ignores those comments when choosing a branch, restoring machine cards and change-schedule rows. A build-time regression test checks the two original templates. The `vue-v0.2.21` directory name is retained solely for older updaters; Vue is not loaded.
