@@ -37,7 +37,7 @@ jobs:
           if (!(Test-Path www/vue-v0.2.20/js/vanilla-runtime.js)) { throw 'Native JS runtime missing' }
           if (!(Test-Path www/vue-v0.2.20/assets/compiled-expressions.js)) { throw 'Precompiled template expressions missing' }
           $compiled=Get-Content www/vue-v0.2.20/js/dashboard-app.js -Raw
-          if ($compiled -match "from\s+['\x22]vue['\x22]") { throw 'Vue runtime reference remained' }
+          if ($compiled.Contains("from 'vue'")) { throw 'Vue runtime reference remained' }
       - name: Test Rust
         run: cargo test
       - name: Compile Windows EXEs
