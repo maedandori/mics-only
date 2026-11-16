@@ -326,7 +326,12 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
                 else {"text/html; charset=utf-8"};
             let found=fs::read(file).ok();
             let is_found=found.is_some();
-            let body=found.unwrap_or_default();
+            let mut body=found.unwrap_or_default();
+            if is_found && matches!(route,"/"|"/index.html") {
+                if let Ok(html)=String::from_utf8(body.clone()) {
+                    body=html.replace("</head>","<script src=\"/vue-diagnostics.js\" defer></script></head>").into_bytes();
+                }
+            }
             reply(&mut stream,if is_found{"200 OK"}else{"404 Not Found"},kind,
                 if method=="HEAD"{&[]}else{&body},"no-cache");
             return
@@ -335,6 +340,7 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     let snapshot=||state.snapshot.lock().map(|v|v.clone()).unwrap_or(json!({}));
     let (status,kind,body,cache)=match path.split('?').next().unwrap_or("") {
         "/"|"/index.html"=>("200 OK","text/html; charset=utf-8",load_www_file("index.html").unwrap_or_default(),"no-cache"),
+        "/vue-diagnostics.js"=>("200 OK","application/javascript; charset=utf-8",load_www_file("vue-diagnostics.js").unwrap_or_default(),"no-cache"),
         "/app.js"=>("200 OK","application/javascript; charset=utf-8",load_www_file("app.js").unwrap_or_default(),"no-cache"),
         "/style.css"=>("200 OK","text/css; charset=utf-8",load_www_file("style.css").unwrap_or_default(),"no-cache"),
         "/sw.js"=>("200 OK","application/javascript; charset=utf-8",load_www_file("sw.js").unwrap_or_default(),"no-cache"),
@@ -360,7 +366,7 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     };
     // Missing or unreadable WWW files are never silently served as 200.
     let is_static=matches!(path.split('?').next().unwrap_or(""),
-        "/"|"/index.html"|"/app.js"|"/style.css"|"/sw.js"|"/manifest.webmanifest"|"/icon.svg");
+        "/"|"/index.html"|"/vue-diagnostics.js"|"/app.js"|"/style.css"|"/sw.js"|"/manifest.webmanifest"|"/icon.svg");
     let final_status=if is_static&&body.is_empty(){"404 Not Found"}else{status};
     reply(&mut stream,final_status,kind,if method=="HEAD"{&[]}else{&body},cache);
 }
