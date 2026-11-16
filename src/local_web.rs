@@ -278,7 +278,12 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
             receive_template_json(&mut stream,&buf[..n],state,route);
             return
         }
-        if name=="change-aliases.json"{fetch_cloud_alias(state);}
+        // Never block initial HTML/JS rendering while the Cloudflare alias service
+        // authenticates. The next GET uses the freshly cached file on disk.
+        if name=="change-aliases.json"{
+            let state_for_refresh=state.clone();
+            thread::spawn(move ||fetch_cloud_alias(&state_for_refresh));
+        }
         let fallback=www_dir().join(concat!("vue-v",env!("CARGO_PKG_VERSION"))).join("data").join(name);
         let raw=fs::read(file).or_else(|_|fs::read(fallback)).unwrap_or_else(|_|b"{}".to_vec());
         reply(&mut stream,"200 OK","application/json; charset=utf-8",if method=="HEAD"{&[]}else{&raw},"no-store");
