@@ -58,7 +58,7 @@ function render(node,ctx,app,path,slot){
   return out;
  }
  const tag=node.tagName.toLowerCase();
- if(tag==='template')return children(node.childNodes,ctx,app,path,slot);
+ if(tag==='template')return children(node.content?.childNodes||node.childNodes,ctx,app,path,slot);
  if(tag==='slot'){
   if(!slot)return children(node.childNodes,ctx,app,path,null);
   const values={};for(const a of node.attributes)if(a.name.startsWith(':'))values[camel(a.name.slice(1))]=evaluate(a.value,ctx);
@@ -71,7 +71,7 @@ function render(node,ctx,app,path,slot){
   const props={};for(const a of node.attributes){if(a.name.startsWith(':'))props[camel(a.name.slice(1))]=evaluate(a.value,ctx);
    else if(!a.name.startsWith('@')&&!a.name.startsWith('v-'))props[camel(a.name)]=a.value;}
   const slotNode=Array.from(node.children).find(n=>n.hasAttribute('#default'));
-  const slotInfo={nodes:slotNode?slotNode.childNodes:node.childNodes,vars:slotNode?.getAttribute('#default')||'{}',ctx};
+  const slotInfo={nodes:slotNode?(slotNode.content?.childNodes||slotNode.childNodes):node.childNodes,vars:slotNode?.getAttribute('#default')||'{}',ctx};
   let instance=app.instances.get(path);
   const emit=(name,...args)=>{const handler=node.getAttribute('@'+name);if(handler)run(handler,ctx,args[0]);later(app)};
   if(!instance){instance={props:{...props},setup:{}};app.instances.set(path,instance);
