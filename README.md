@@ -202,3 +202,12 @@ On each new page load the original template opens in grid mode, ignoring an old 
 ### v0.2.26 — Faster local dashboard rendering
 
 The framework-free renderer now memoizes template computed expressions during each render, avoiding repeated calculations for every field of each machine card. The Dashboard reads machine JSON immediately; the larger local schedule is processed after the first paint and cached until it changes. Status/alias configuration refreshes in parallel instead of blocking node display. Unchanged machine JSON and settings do not trigger a full redraw. Schedule changes still update forecast displays, and the original 4-page template, data files, and no-rollback installer remain unchanged.
+
+
+### v0.2.27 — Concurrent loopback server, cached DOM templates & instant page loads
+
+- The loopback HTTP server (`127.0.0.1:8787`) now serves concurrent connections with `TCP_NODELAY` and a 400ms read timeout so browser preconnect sockets never stall HTML/CSS/JS/JSON requests.
+- Validated `data/machines.json` and `data/schedule-local.json` payloads are cached in memory by file modification timestamp, avoiding repeated disk reads and JSON parsing on unchanged snapshots.
+- Versioned static assets under `/vue-v0.2.27/` use browser caching (`max-age=3600`) for instant 0ms navigation across the 4 pages.
+- Direct `/data/change-aliases.json` and `/data/status-colors.json` routes are served from the local `data/` directory, and alias edits persist locally first so offline local web editing works even without Cloudflare D1 connectivity.
+- Component `<template>` fragments are parsed once and cached in `vanilla-runtime.js`, alias rules are precompiled and memoized with `WeakMap`, and `sessionStorage` snapshot hydration renders nodes on frame 0 while refreshing local JSON in the background.

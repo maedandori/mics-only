@@ -27,68 +27,36 @@ const start=common.indexOf('export async function loadData() {');
 const end=common.indexOf('export async function loadFromFile(file)',start);
 if(start<0||end<0)throw Error('Original common.js loader not found');
 const localLoader=`// Fast local JSON loader. Browser never requests a production database.
+const SS_MACHINES = 'mics.fastMachines.v1';
+const SS_SCHEDULE = 'mics.fastSchedule.v1';
 let lastMachineText = null, lastMachineData = null;
 let lastScheduleText = null, lastScheduleData = {rows:[]};
 let lastSchedulesText = undefined, lastSchedules = Object.create(null);
 let scheduleTimer = null;
 let lastNormalized = null, normalizedMachineText = null, normalizedScheduleText = null;
 let schedulePromise = null, scheduleRequestedAt = 0;
-async function refreshLocalSchedule() {
-  if (schedulePromise) return schedulePromise;
-  if (Date.now() - scheduleRequestedAt < 5000) return;
-  scheduleRequestedAt = Date.now();
-  schedulePromise = (async () => {
-    const response = await fetch('/data/schedule-local.json', {cache: 'no-store'});
-    if (!response.ok) throw new Error('Local schedule JSON HTTP ' + response.status);
-    const text = await response.text();
-    if (text === lastScheduleText) return;
-    const parsed = JSON.parse(text);
-    if (!Array.isArray(parsed.rows)) throw new Error('Invalid local schedule JSON rows');
-    lastScheduleText = text;
-    lastScheduleData = parsed;
-    lastNormalized = null;
-    // Update next-change forecasts after initial cards are already visible.
-    window.dispatchEvent(new Event('mics-local-schedule-ready'));
-  })().catch(error => console.warn('Local schedule cache retained:', error))
-    .finally(() => {schedulePromise = null;});
-  return schedulePromise;
-}
-export async function loadData(waitForSchedule = false) {
-  // Render machine nodes as soon as the small local JSON arrives.
-  // Do not wait for the potentially large schedule file on Dashboard.
-  try {
-    const response = await fetch('/data/machines.json', {cache: 'no-store'});
-    if (!response.ok) throw new Error('Local machines JSON HTTP ' + response.status);
-    const text = await response.text();
-    if (text !== lastMachineText) {
-      const parsed = JSON.parse(text);
-      if (!Array.isArray(parsed.machines) || !parsed.machines.length)
-        throw new Error('Local machines JSON is empty');
-      lastMachineText = text;
-      lastMachineData = parsed;
-      lastNormalized = null;
+try {
+  if (typeof sessionStorage !== 'undefined') {
+    const cachedM = sessionStorage.getItem(SS_MACHINES);
+    if (cachedM) {
+      const parsedM = JSON.parse(cachedM);
+      if (Array.isArray(parsedM.machines) && parsedM.machines.length) {
+        lastMachineText = cachedM;
+        lastMachineData = parsedM;
+      }
     }
-  } catch(error) {
-    console.warn('Local machines JSON unavailable, preserving last snapshot:', error);
-    if (!lastMachineData) {
-      // Show machine placeholders rather than removing every node on initial failure.
-      lastMachineData = {machines:[15,8,19,14,5,17,13,6,10,11,18,7,12,16]
-        .map(machine_no => ({machine_no, status_name:'データなし'}))};
-      lastMachineText = '__placeholder__';
+    const cachedS = sessionStorage.getItem(SS_SCHEDULE);
+    if (cachedS) {
+      const parsedS = JSON.parse(cachedS);
+      if (Array.isArray(parsedS.rows)) {
+        lastScheduleText = cachedS;
+        lastScheduleData = parsedS;
+      }
     }
   }
-  // Delay large schedule parsing until after the first dashboard paint.
-  // A dedicated schedule page still awaits its local JSON immediately.
-  if (waitForSchedule || location.pathname.endsWith('/change-schedule.html')) {
-    await refreshLocalSchedule();
-  } else if (scheduleTimer === null) {
-    scheduleTimer = setTimeout(() => {
-      scheduleTimer = null;
-      void refreshLocalSchedule();
-    }, 750);
-  }
-  // If both JSON files are unchanged, reuse the exact result object and skip
-  // expensive normalization and unnecessary native-DOM redraws.
+} catch {}
+function buildNormalizedSnapshot() {
+  if (!lastMachineData) return null;
   if (lastNormalized && normalizedMachineText === lastMachineText &&
       normalizedScheduleText === lastScheduleText) return lastNormalized;
   const machines = lastMachineData.machines.map(m => ({
@@ -122,9 +90,132 @@ export async function loadData(waitForSchedule = false) {
   normalizedScheduleText = lastScheduleText;
   return lastNormalized;
 }
+if (typeof window !== 'undefined') {
+  window.__micsCachedData = (requireSchedule = false) => {
+    if (!lastMachineData) return null;
+    if (requireSchedule && !lastScheduleText) return null;
+    return buildNormalizedSnapshot();
+  };
+}
+async function refreshLocalSchedule() {
+  if (schedulePromise) return schedulePromise;
+  if (Date.now() - scheduleRequestedAt < 5000 && lastScheduleText) return;
+  scheduleRequestedAt = Date.now();
+  schedulePromise = (async () => {
+    const response = await fetch('/data/schedule-local.json', {cache: 'no-store'});
+    if (!response.ok) throw new Error('Local schedule JSON HTTP ' + response.status);
+    const text = await response.text();
+    if (text === lastScheduleText) return;
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed.rows)) throw new Error('Invalid local schedule JSON rows');
+    lastScheduleText = text;
+    lastScheduleData = parsed;
+    lastNormalized = null;
+    try { if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(SS_SCHEDULE, text); } catch {}
+    // Update next-change forecasts after initial cards are already visible.
+    window.dispatchEvent(new Event('mics-local-schedule-ready'));
+  })().catch(error => console.warn('Local schedule cache retained:', error))
+    .finally(() => {schedulePromise = null;});
+  return schedulePromise;
+}
+export async function loadData(waitForSchedule = false) {
+  const needSchedule = waitForSchedule || location.pathname.endsWith('/change-schedule.html');
+  // Start schedule request in parallel when required by schedule/Gantt view.
+  const parallelSchedule = needSchedule ? refreshLocalSchedule() : null;
+  // Render machine nodes as soon as the small local JSON arrives.
+  // Do not wait for the potentially large schedule file on Dashboard.
+  try {
+    const response = await fetch('/data/machines.json', {cache: 'no-store'});
+    if (!response.ok) throw new Error('Local machines JSON HTTP ' + response.status);
+    const text = await response.text();
+    if (text !== lastMachineText) {
+      const parsed = JSON.parse(text);
+      if (!Array.isArray(parsed.machines) || !parsed.machines.length)
+        throw new Error('Local machines JSON is empty');
+      lastMachineText = text;
+      lastMachineData = parsed;
+      lastNormalized = null;
+      try { if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(SS_MACHINES, text); } catch {}
+    }
+  } catch(error) {
+    console.warn('Local machines JSON unavailable, preserving last snapshot:', error);
+    if (!lastMachineData) {
+      // Show machine placeholders rather than removing every node on initial failure.
+      lastMachineData = {machines:[15,8,19,14,5,17,13,6,10,11,18,7,12,16]
+        .map(machine_no => ({machine_no, status_name:'データなし'}))};
+      lastMachineText = '__placeholder__';
+    }
+  }
+  // Delay large schedule parsing until after the first dashboard paint.
+  // A dedicated schedule page still awaits its local JSON immediately.
+  if (parallelSchedule) {
+    await parallelSchedule;
+  } else if (scheduleTimer === null) {
+    scheduleTimer = setTimeout(() => {
+      scheduleTimer = null;
+      void refreshLocalSchedule();
+    }, 16);
+  }
+  // If both JSON files are unchanged, reuse the exact result object and skip
+  // expensive normalization and unnecessary native-DOM redraws.
+  return buildNormalizedSnapshot();
+}
 
 `;
 common=common.slice(0,start)+localLoader+common.slice(end);
+
+// Precompile and memoize alias matching so 30-day schedule scans do not
+// recreate and sort candidate arrays or recompile RegExps on every row.
+const matchStart=common.indexOf('function aliasTokenMatches(text, lowerText, alias) {');
+const matchEnd=common.indexOf('export function extractColor(rowOrProd, aliasCfg) {',matchStart);
+if(matchStart<0||matchEnd<=matchStart)throw Error('Original matchAliasRule not found');
+const fastAliasMatcher=`const compiledRuleCache = new WeakMap();
+function getCompiledRules(rules) {
+  let entry = compiledRuleCache.get(rules);
+  if (entry) return entry;
+  const candidates = [];
+  for (let i = 0; i < rules.length; i++) {
+    const rule = rules[i];
+    if (!rule || !rule.canonical) continue;
+    for (const a of rule.aliases || []) {
+      if (!a) continue;
+      const isAsciiWord = /^[A-Za-z]+$/.test(a);
+      candidates.push({
+        alias: a,
+        lowerAlias: a.toLowerCase(),
+        re: isAsciiWord ? new RegExp(\`(?:^|[^A-Za-z0-9])\${escapeRegExp(a)}(?=$|[^A-Za-z0-9])\`, 'i') : null,
+        canonical: rule.canonical,
+        idx: i,
+      });
+    }
+  }
+  candidates.sort((x, y) => (y.alias.length - x.alias.length) || (x.idx - y.idx));
+  entry = { candidates, hits: new Map() };
+  compiledRuleCache.set(rules, entry);
+  return entry;
+}
+
+export function matchAliasRule(text, rules) {
+  const s = String(text || '').trim();
+  if (!s || !Array.isArray(rules) || !rules.length) return '';
+  const { candidates, hits } = getCompiledRules(rules);
+  const cached = hits.get(s);
+  if (cached !== undefined) return cached;
+  const lower = s.toLowerCase();
+  let matched = '';
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
+    if (c.re ? c.re.test(s) : lower.includes(c.lowerAlias)) {
+      matched = c.canonical;
+      break;
+    }
+  }
+  if (hits.size < 4000) hits.set(s, matched);
+  return matched;
+}
+
+`;
+common=common.slice(0,matchStart)+fastAliasMatcher+common.slice(matchEnd);
 
 // D1 is authoritative: never display an unsynchronized alias edit as saved.
 // Keep original layout/UI, only change the persistence behavior.
@@ -166,6 +257,7 @@ const replaceDashboard=(from,to)=>{
  if(count!==1)throw Error('Original dashboard patch mismatch: '+from.slice(0,55));
  dashboard=dashboard.replace(from,to);
 };
+replaceDashboard("data: null,","data: (typeof window !== 'undefined' && typeof window.__micsCachedData === 'function' ? window.__micsCachedData(false) : null),");
 replaceDashboard("view: localStorage.getItem('mics.view') || 'grid',","view: 'grid',");
 replaceDashboard(`    function setView(v) {
       state.view = v;
@@ -194,6 +286,11 @@ dashboard=dashboard.replace("      window.addEventListener('storage', onStorage)
 dashboard=dashboard.replace("      window.removeEventListener('storage', onStorage);",
  "      window.removeEventListener('storage', onStorage);\n      window.removeEventListener('mics-local-schedule-ready', onLocalScheduleReady);");
 writeFileSync(dashboardPath,dashboard);
+
+const scheduleAppPath=resolve(root,'js/change-schedule-app.js');
+let scheduleApp=readFileSync(scheduleAppPath,'utf8');
+scheduleApp=scheduleApp.replace("data: null,","data: (typeof window !== 'undefined' && typeof window.__micsCachedData === 'function' ? window.__micsCachedData(true) : null),");
+writeFileSync(scheduleAppPath,scheduleApp);
 
 const aliasAppPath=resolve(root,'js/change-aliases-app.js');
 let aliasApp=readFileSync(aliasAppPath,'utf8');

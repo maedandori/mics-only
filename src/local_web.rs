@@ -1,6 +1,9 @@
 //! Loopback-only HTTP server. Never bind to a LAN/public interface.
 use serde_json::{json, Value};
-use std::{fs, io::{Read,Write}, net::{TcpListener,TcpStream}, path::{Path,PathBuf}, sync::{Arc,Mutex}, thread, time::{Duration,Instant}};
+use std::{fs, io::{Read,Write}, net::{TcpListener,TcpStream}, path::{Path,PathBuf}, sync::{Arc,Mutex,atomic::{AtomicU8,AtomicUsize,Ordering}}, thread, time::{Duration,Instant,SystemTime}};
+
+static VUE_ASSETS_STATE: AtomicU8 = AtomicU8::new(0);
+static ACTIVE_WEB_CLIENTS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone)]
 pub struct LocalState {
@@ -13,6 +16,8 @@ pub struct LocalState {
     pub alias_last_check: Arc<Mutex<Option<Instant>>>,
     pub alias_sync_status: Arc<Mutex<String>>,
     pub alias_last_sync_at: Arc<Mutex<Option<String>>>,
+    pub machines_cache: Arc<Mutex<Option<(SystemTime,Vec<u8>)>>>,
+    pub schedule_cache: Arc<Mutex<Option<(SystemTime,Vec<u8>)>>>,
 }
 impl LocalState {
     pub fn new(data_path:PathBuf)->Self {
@@ -42,7 +47,10 @@ impl LocalState {
             sync_status:Arc::new(Mutex::new("NOT_SYNCED".into())),last_sync_at:Arc::new(Mutex::new(None)),
             alias_cloud:Arc::new(Mutex::new(None)),alias_last_check:Arc::new(Mutex::new(None)),
             alias_sync_status:Arc::new(Mutex::new("NOT_CHECKED".into())),
-            alias_last_sync_at:Arc::new(Mutex::new(None)),data_path}
+            alias_last_sync_at:Arc::new(Mutex::new(None)),
+            machines_cache:Arc::new(Mutex::new(None)),
+            schedule_cache:Arc::new(Mutex::new(None)),
+            data_path}
     }
     pub fn set_alias_sync(&self,coordinator_url:&str,token:&str){
         if coordinator_url.starts_with("https://") && !token.is_empty(){
@@ -91,6 +99,7 @@ impl LocalState {
             if backup.exists(){let _=fs::rename(&backup,&self.data_path);}
             return Err(e.to_string())
         }
+        if let Ok(mut cache)=self.machines_cache.lock(){*cache=None;}
         if let Ok(mut v)=self.snapshot.lock(){*v=data}
         Ok(())
     }
@@ -111,7 +120,10 @@ fn load_www_file(name:&str)->Option<Vec<u8>>{
 // An HTML file alone does not mean that the Vue app can boot. Check the
 // referenced Vite JS/CSS files before preferring it to the legacy dashboard.
 fn vue_bundle_ready(dir:&Path)->bool{
-    let Ok(index)=fs::read_to_string(dir.join("index.html")) else{return false};
+    let entry=dir.join("index.html");
+    if !entry.is_file(){return false}
+    if VUE_ASSETS_STATE.load(Ordering::Relaxed)==1 {return true}
+    let Ok(index)=fs::read_to_string(&entry) else{return false};
     let prefix=format!("/vue-v{}/",env!("CARGO_PKG_VERSION"));
     let mut found=0usize;
     for quoted in index.split(['"', '\'']) {
@@ -122,13 +134,18 @@ fn vue_bundle_ready(dir:&Path)->bool{
             }
         }
     }
-    found>0
+    if found>0 {
+        VUE_ASSETS_STATE.store(1,Ordering::Relaxed);
+        true
+    } else {
+        false
+    }
 }
 
 fn template_settings_file(state:&LocalState,route:&str)->Option<(PathBuf,&'static str)> {
     let name=match route {
-        "/api/ui-template/aliases"=>"change-aliases.json",
-        "/api/ui-template/status-colors"=>"status-colors.json",
+        "/api/ui-template/aliases"|"/data/change-aliases.json"=>"change-aliases.json",
+        "/api/ui-template/status-colors"|"/data/status-colors.json"=>"status-colors.json",
         _=>return None
     };
     Some((state.data_path.with_file_name(name),name))
@@ -201,25 +218,32 @@ pub fn start_alias_sync(state:LocalState){
     });
 }
 fn put_cloud_alias(state:&LocalState,body:&[u8])->Result<(),String>{
-    let (url,token)=alias_cloud_credentials(state)
-        .ok_or("Cloud alias sync not configured: save Coordinator Token in MICS-only Settings")?;
-    // Validate locally before sending. Cloudflare also validates the same schema.
-    let value:Value=serde_json::from_slice(body).map_err(|_|"Invalid alias JSON")?;
-    if !["color","mold","stamp"].iter().all(|kind|value.get(kind).and_then(Value::as_array).is_some())
-       {return Err("Invalid alias configuration".into())}
-    let result=ureq::AgentBuilder::new().timeout(Duration::from_secs(10)).build()
+    // Always validate and persist locally first so offline local web works without D1.
+    let path=state.data_path.with_file_name("change-aliases.json");
+    save_template_json(&path,body,"change-aliases.json")?;
+    let Some((url,token))=alias_cloud_credentials(state) else {
+        record_alias_status(state,"LOCAL_ONLY");
+        return Ok(())
+    };
+    let result=ureq::AgentBuilder::new().timeout(Duration::from_secs(6)).build()
         .put(&url).set("Authorization",&format!("Bearer {token}"))
         .set("Content-Type","application/json").send_bytes(body);
     match result{
         Ok(resp) if resp.status()==200=>{
-            let path=state.data_path.with_file_name("change-aliases.json");
-            save_template_json(&path,body,"change-aliases.json")?;
             if let Ok(mut last)=state.alias_last_check.lock(){*last=Some(Instant::now());}
             record_alias_status(state,"SYNCED");
             Ok(())
         }
-        Ok(resp)=>Err(format!("Cloudflare alias sync HTTP {}",resp.status())),
-        Err(e)=>Err(format!("Cloudflare alias sync unavailable: {e}"))
+        Ok(resp)=>{
+            eprintln!("ALIAS_PUT_HTTP_{}",resp.status());
+            record_alias_status(state,"LOCAL_SAVED_CLOUD_ERROR");
+            Ok(())
+        }
+        Err(e)=>{
+            eprintln!("ALIAS_PUT_OFFLINE {e}");
+            record_alias_status(state,"LOCAL_SAVED_OFFLINE");
+            Ok(())
+        }
     }
 }
 fn validate_template_json(bytes:&[u8],name:&str)->Result<(),String>{
@@ -299,7 +323,8 @@ fn receive_template_json(stream:&mut TcpStream,first_bytes:&[u8],state:&LocalSta
 }
 
 fn serve(mut stream:TcpStream,state:&LocalState) {
-    let _=stream.set_read_timeout(Some(Duration::from_secs(3)));
+    let _=stream.set_nodelay(true);
+    let _=stream.set_read_timeout(Some(Duration::from_millis(400)));
     let _=stream.set_write_timeout(Some(Duration::from_secs(3)));
     let mut buf=[0u8;8192];
     let Ok(n)=stream.read(&mut buf) else{return};
@@ -339,15 +364,32 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
         reply(&mut stream,"405 Method Not Allowed","text/plain",b"PUT only for JSON settings","no-store");return
     }
     // Serve the two on-disk JSON snapshots directly over loopback.
-    // This does not query Firebird, Turso or D1 and never exposes arbitrary paths.
-    // Keep the last good in-memory copy if an atomic rename briefly hides machines.json.
+    // Reuse validated in-memory bytes when the file timestamp is unchanged.
     if route=="/data/machines.json" {
+        let mtime=fs::metadata(&state.data_path).and_then(|m|m.modified()).ok();
+        if let Some(t)=mtime {
+            if let Ok(guard)=state.machines_cache.lock() {
+                if let Some((cached_t,cached_bytes))=guard.as_ref() {
+                    if *cached_t==t {
+                        reply(&mut stream,"200 OK","application/json; charset=utf-8",
+                            if method=="HEAD"{&[]}else{cached_bytes},"no-store");
+                        return
+                    }
+                }
+            }
+        }
         let valid=|bytes:&[u8]|->bool {
             serde_json::from_slice::<Value>(bytes).ok()
                 .and_then(|v|v.get("machines").and_then(Value::as_array).cloned())
                 .is_some_and(|rows|!rows.is_empty())
         };
-        let raw=fs::read(&state.data_path).ok().filter(|v|valid(v))
+        let from_main=fs::read(&state.data_path).ok().filter(|v|valid(v));
+        if let (Some(t),Some(bytes))=(mtime,from_main.as_ref()) {
+            if let Ok(mut guard)=state.machines_cache.lock() {
+                *guard=Some((t,bytes.clone()));
+            }
+        }
+        let raw=from_main
             .or_else(||fs::read(state.data_path.with_extension("json.bak")).ok().filter(|v|valid(v)))
             .unwrap_or_else(||serde_json::to_vec(&state.snapshot.lock()
                 .map(|v|v.clone()).unwrap_or_else(|_|json!({"machines":[]}))).unwrap_or_default());
@@ -357,10 +399,28 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     }
     if route=="/data/schedule-local.json" {
         let path=state.data_path.with_file_name("schedule-local.json");
-        let raw=fs::read(path).ok().filter(|bytes|{
+        let mtime=fs::metadata(&path).and_then(|m|m.modified()).ok();
+        if let Some(t)=mtime {
+            if let Ok(guard)=state.schedule_cache.lock() {
+                if let Some((cached_t,cached_bytes))=guard.as_ref() {
+                    if *cached_t==t {
+                        reply(&mut stream,"200 OK","application/json; charset=utf-8",
+                            if method=="HEAD"{&[]}else{cached_bytes},"no-store");
+                        return
+                    }
+                }
+            }
+        }
+        let from_disk=fs::read(&path).ok().filter(|bytes|{
             serde_json::from_slice::<Value>(bytes).ok()
                 .and_then(|v|v.get("rows").and_then(Value::as_array).cloned()).is_some()
-        }).unwrap_or_else(||b"{\"rows\":[],\"from\":null,\"to\":null}".to_vec());
+        });
+        if let (Some(t),Some(bytes))=(mtime,from_disk.as_ref()) {
+            if let Ok(mut guard)=state.schedule_cache.lock() {
+                *guard=Some((t,bytes.clone()));
+            }
+        }
+        let raw=from_disk.unwrap_or_else(||b"{\"rows\":[],\"from\":null,\"to\":null}".to_vec());
         reply(&mut stream,"200 OK","application/json; charset=utf-8",
             if method=="HEAD"{&[]}else{&raw},"no-store");
         return
@@ -411,6 +471,11 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
                 else if route.ends_with(".woff") {"font/woff"}
                 else if route.ends_with(".ico") {"image/x-icon"}
                 else {"text/html; charset=utf-8"};
+            let cache_policy=if explicit_vue_asset && (route.ends_with(".js") || route.ends_with(".css") || route.ends_with(".svg") || route.ends_with(".png") || route.ends_with(".woff2") || route.ends_with(".woff") || route.ends_with(".ico")) {
+                "public, max-age=3600"
+            } else {
+                "no-cache"
+            };
             let found=fs::read(file).ok();
             let is_found=found.is_some();
             let mut body=found.unwrap_or_default();
@@ -420,7 +485,7 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
                 }
             }
             reply(&mut stream,if is_found{"200 OK"}else{"404 Not Found"},kind,
-                if method=="HEAD"{&[]}else{&body},"no-cache");
+                if method=="HEAD"{&[]}else{&body},cache_policy);
             return
         }
     }
@@ -483,7 +548,18 @@ pub fn start(state:LocalState)->Result<(),String>{
         println!("LOCAL_WEB_READY http://127.0.0.1:8787");
         for client in listener.incoming(){
             match client{
-                Ok(stream)=>serve(stream,&state),
+                Ok(stream)=>{
+                    if ACTIVE_WEB_CLIENTS.fetch_add(1,Ordering::AcqRel)<32 {
+                        let st=state.clone();
+                        thread::spawn(move ||{
+                            serve(stream,&st);
+                            ACTIVE_WEB_CLIENTS.fetch_sub(1,Ordering::Release);
+                        });
+                    } else {
+                        ACTIVE_WEB_CLIENTS.fetch_sub(1,Ordering::Release);
+                        serve(stream,&state);
+                    }
+                },
                 Err(e)=>eprintln!("LOCAL_WEB_CLIENT_FAILED {e}")
             }
         }

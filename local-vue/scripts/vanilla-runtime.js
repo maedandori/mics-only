@@ -38,7 +38,8 @@ const interpolate=(s,ctx)=>s.replace(/{{([\s\S]*?)}}/g,(_,code)=>String(evaluate
 const cssClass=x=>Array.isArray(x)?x.map(cssClass).filter(Boolean).join(' '):x&&typeof x==='object'?Object.keys(x).filter(k=>x[k]).join(' '):String(x??'');
 const kebab=s=>s.replace(/[A-Z]/g,c=>'-'+c.toLowerCase());
 const camel=s=>s.replace(/-([a-z])/g,(_,c)=>c.toUpperCase());
-function parse(html){const t=document.createElement('template');t.innerHTML=html;return t.content}
+const templateCache=new Map();
+function parse(html){let t=templateCache.get(html);if(!t){t=document.createElement('template');t.innerHTML=html;templateCache.set(html,t)}return t.content}
 function forEntries(value,ctx){const m=value.match(/^\s*(?:\(([^,]+),\s*([^)]+)\)|([\w$]+))\s+(?:in|of)\s+([\s\S]+)$/);
  if(!m)return[];let v=evaluate(m[4],ctx);if(typeof v==='number')v=Array.from({length:v},(_,i)=>i+1);
  return v&&v[Symbol.iterator]?Array.from(v, (x,i)=>scope(ctx,{[m[1]||m[3]]:x,...(m[2]?{[m[2]]:i}:{})})):[];
