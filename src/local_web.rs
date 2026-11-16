@@ -292,8 +292,9 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     let route=path.split('?').next().unwrap_or("");
     let vue_dir=www_dir().join(concat!("vue-v",env!("CARGO_PKG_VERSION")));
     let vue_entry=vue_dir.join("index.html");
+    let legacy_ui=path.split("?").nth(1).is_some_and(|q|q.split("&").any(|v|v=="legacy=1"));
 
-    if vue_bundle_ready(&vue_dir) {
+    if !legacy_ui && vue_bundle_ready(&vue_dir) {
         let requested=if matches!(route,"/"|"/index.html"){
             Some(vue_entry.clone())
         }else if matches!(route,"/change-schedule.html"|"/status-colors.html"|"/change-aliases.html"){
@@ -304,7 +305,17 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
                 relative.bytes().all(|b|b.is_ascii_alphanumeric()||b"-_./".contains(&b)) &&
                 !relative.contains("..") && !relative.contains("//") &&
                 (relative.starts_with("assets/") || relative.starts_with("data/") ||
+                 relative.starts_with("css/") || relative.starts_with("js/") ||
+                 relative.starts_with("img/") || relative.starts_with("images/") ||
                  matches!(relative,"index.html"|"change-schedule.html"|"status-colors.html"|"change-aliases.html")) {
+                Some(vue_dir.join(relative))
+            }else{None}
+        }else if route.starts_with("/css/") || route.starts_with("/js/") ||
+                 route.starts_with("/data/") || route.starts_with("/images/") ||
+                 route.starts_with("/img/") {
+            let relative=route.trim_start_matches('/');
+            if relative.len()<220 && !relative.contains("..") && !relative.contains("//") &&
+                relative.bytes().all(|b|b.is_ascii_alphanumeric()||b"-_./".contains(&b)){
                 Some(vue_dir.join(relative))
             }else{None}
         }else{None};
