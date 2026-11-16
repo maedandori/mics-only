@@ -49,7 +49,7 @@ async function refreshLocalSchedule() {
     .finally(() => {schedulePromise = null;});
   return schedulePromise;
 }
-export async function loadData() {
+export async function loadData(waitForSchedule = false) {
   // Render machine nodes as soon as the small local JSON arrives.
   // Do not wait for the potentially large schedule file on Dashboard.
   try {
@@ -75,7 +75,7 @@ export async function loadData() {
   }
   const loadingSchedule = refreshLocalSchedule();
   // The schedule page needs complete rows before its first render.
-  if (location.pathname.endsWith('/change-schedule.html')) await loadingSchedule;
+  if (waitForSchedule || location.pathname.endsWith('/change-schedule.html')) await loadingSchedule;
   // If both JSON files are unchanged, reuse the exact result object and skip
   // expensive normalization and unnecessary native-DOM redraws.
   if (lastNormalized && normalizedMachineText === lastMachineText &&
@@ -139,6 +139,28 @@ common=common.replace("export const ALIASES_JSON_URL = '/api/ui-template/aliases
 common=common.replace("export const STATUS_JSON_URL = '/api/ui-template/status-colors';","export const STATUS_JSON_URL = '/api/ui-template/status-colors';");
 common=common.replaceAll('Machine-Control D1 JSON','MICS-only local JSON');
 writeFileSync(commonPath,common);
+
+// Preserve layout but make dashboard cards the default on every new page.
+const dashboardPath=resolve(root,'js/dashboard-app.js');
+let dashboard=readFileSync(dashboardPath,'utf8');
+const replaceDashboard=(from,to)=>{
+ const count=dashboard.split(from).length-1;
+ if(count!==1)throw Error('Original dashboard patch mismatch: '+from.slice(0,55));
+ dashboard=dashboard.replace(from,to);
+};
+replaceDashboard("view: localStorage.getItem('mics.view') || 'grid',","view: 'grid',");
+replaceDashboard(`    function setView(v) {
+      state.view = v;
+      localStorage.setItem('mics.view', v);
+    }`,`    function setView(v) {
+      state.view = v;
+      // Only the schedule view must wait for local schedule JSON.
+      if (v === 'gantt') load();
+    }`);
+replaceDashboard('file ? loadFromFile(file) : loadData(),',"file ? loadFromFile(file) : loadData(state.view === 'gantt'),");
+replaceDashboard('日程データ (mics_schedule_week) がありません。',
+ '日程データ (data/schedule-local.json) がありません。保存された予定を確認してください。');
+writeFileSync(dashboardPath,dashboard);
 
 const aliasAppPath=resolve(root,'js/change-aliases-app.js');
 let aliasApp=readFileSync(aliasAppPath,'utf8');

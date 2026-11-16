@@ -192,3 +192,8 @@ v0.2.22 portable EXEs manually once, retaining existing `mics.ini` and
 ### v0.2.24 — Direct local JSON and faster first dashboard render
 
 The original ZIP template uses `/data/machines.json` and `/data/schedule-local.json` served from the executable's `data/` directory over localhost. These read-only routes never contact Firebird, D1 or Turso. Machine cards are displayed before the schedule file finishes loading; the schedule page waits for schedules. Identical JSON snapshots reuse their normalized result instead of repeating large schedule transformations. The agent still collects and writes Firebird data in the background, and `/?legacy=1` remains the fallback. Existing local JSON files and settings are preserved.
+
+
+### v0.2.25 — Restore machine cards and correct render warnings
+
+On each new page load the original template opens in grid mode, ignoring an old Gantt/list selection stored in the browser. Selecting Gantt explicitly waits for the saved local schedule JSON. The old SQLite table-name error is replaced with the name of the real local JSON file. Boot diagnostics inspect the actual `[data-machine]` cards and do not flag an intentionally card-free Gantt/list display. The Windows release build seeds fourteen local machine rows and checks rendered cards in a headless browser, instead of relying on HTTP status alone.

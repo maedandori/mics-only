@@ -29,4 +29,9 @@ assert.match(loader,/fetch\('\/data\/machines\.json'/,'Browser must read the loc
 assert.match(loader,/fetch\('\/data\/schedule-local\.json'/,'Browser must read the local schedule JSON directly');
 assert.ok(!loader.includes("fetch('/api/machines'")&&!loader.includes("fetch('/api/schedule'"),'Database-like API polling must not reappear');
 assert.match(loader,/lastNormalized/,'Unchanged JSON should reuse normalized state');
-console.log('PASS original nodes, local JSON-only loader, schedule deferral, CSS');
+assert.match(dashboard,/view: 'grid'/,'Dashboard must open machine cards by default');
+assert.match(dashboard,/loadData\(state.view === 'gantt'\)/,'Gantt should wait for schedule JSON');
+assert.match(dashboard,/data\/schedule-local\.json/,'Old SQL table message should be replaced');
+const diagnostics=readFileSync(resolve('../www','vue-diagnostics.js'),'utf8');
+assert.match(diagnostics,/querySelectorAll\('\[data-machine\]'\)/,'Diagnostics should use actual node attributes');
+console.log('PASS original nodes, default grid, local schedule, accurate diagnostics and CSS');
