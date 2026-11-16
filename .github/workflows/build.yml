@@ -89,6 +89,17 @@ jobs:
               $res=Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 5
               if($res.StatusCode -ne 200 -or $res.RawContentLength -lt 20){throw "Bundled asset failed: $url"}
             }
+            # A missing template must fall back to the classic UI, not kill agent.
+            $vueIndexFile=Join-Path $folder 'www/vue-v0.2.19/index.html'
+            Rename-Item -LiteralPath $vueIndexFile -NewName 'index.html.smoketest'
+            try {
+              $fallback=Invoke-WebRequest 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 5
+              if($fallback.StatusCode -ne 200 -or $fallback.Content -notlike '*id="machines"*'){throw 'Missing Vue bundle should fall back to classic UI'}
+              $statusAfterFallback=Invoke-RestMethod 'http://127.0.0.1:8787/api/status' -TimeoutSec 5
+              if($statusAfterFallback.ok -ne $true){throw 'Missing template affected agent API'}
+            } finally {
+              Rename-Item -LiteralPath (Join-Path $folder 'www/vue-v0.2.19/index.html.smoketest') -NewName 'index.html'
+            }
             $alias=Invoke-RestMethod 'http://127.0.0.1:8787/api/ui-template/aliases' -TimeoutSec 5
             if($null -eq $alias.color -or $null -eq $alias.mold -or $null -eq $alias.stamp){throw 'Invalid local alias response'}
           } finally {
