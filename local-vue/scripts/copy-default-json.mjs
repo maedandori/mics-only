@@ -1,8 +1,14 @@
-import {mkdirSync,copyFileSync} from 'node:fs';
+import {mkdirSync,copyFileSync,readFileSync,existsSync} from 'node:fs';
 import {resolve} from 'node:path';
-const dest=resolve('../www/vue-v0.2.10/data');
+
+// Keep the output in sync with vite.config.js and package.json on each release.
+const {version}=JSON.parse(readFileSync(resolve('package.json'),'utf8'));
+if(!/^\d+\.\d+\.\d+$/.test(version))throw new Error('Invalid package version: '+version);
+const dest=resolve('../www/vue-v'+version+'/data');
 mkdirSync(dest,{recursive:true});
 for(const n of ['change-aliases.json','status-colors.json']){
- copyFileSync(resolve('original/data',n),resolve(dest,n));
+ const source=resolve('original/data',n);
+ if(!existsSync(source))throw new Error('Missing original UI JSON: '+source);
+ copyFileSync(source,resolve(dest,n));
 }
-console.log('Copied default UI JSON settings to versioned bundle');
+console.log('Copied default UI JSON settings to versioned bundle: v'+version);
