@@ -105,11 +105,15 @@ try {
   if(!$healthy){throw 'New agent health/version check failed'}
   Log 'UPDATE_STAGE 90 Agent API health verified'
   $page=Invoke-WebRequest -Uri 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 4
-  if($page.StatusCode -ne 200 -or $page.Content -notlike '*id="machines"*' -or $page.Content -notlike '*src="/app.js"*'){
-    throw 'Legacy local dashboard health check failed'
+  if($page.StatusCode -ne 200 -or $page.Content -notlike ('*'+$vueName+'/*')){
+    throw 'Uploaded template not served as default'
   }
-  $scriptCheck=Invoke-WebRequest -Uri 'http://127.0.0.1:8787/app.js' -UseBasicParsing -TimeoutSec 4
-  if($scriptCheck.StatusCode -ne 200 -or $scriptCheck.Content.Length -lt 100){throw 'Legacy app.js unavailable'}
+  $moduleCheck=Invoke-WebRequest -Uri 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 4
+  foreach($assetRef in $assetRefs){
+    $url='http://127.0.0.1:8787/'+$vueName+'/'+$assetRef.Groups[1].Value
+    $assetCheck=Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 4
+    if($assetCheck.StatusCode -ne 200 -or $assetCheck.Content.Length -lt 20){throw "Template asset unavailable: $url"}
+  }
   Remove-Item -LiteralPath (Join-Path $Target 'data\update-blocked-version.txt') -Force -ErrorAction SilentlyContinue
   Log "UPDATE_STAGE 100 Local web verified"
   Log "UPDATE_SUCCESS $Version"
