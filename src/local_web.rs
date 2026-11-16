@@ -443,13 +443,15 @@ pub fn start(state:LocalState)->Result<(),String>{
     // Settings restarts the agent immediately; the old process may still be
     // releasing the local port for a brief moment.
     let mut listener=None;
-    for _ in 0..20 {
+    // Windows may retain the old listener while Stop-Process completes.
+    // Retry for 20 seconds rather than exiting after only 3 seconds.
+    for _ in 0..100 {
         match TcpListener::bind("127.0.0.1:8787"){
             Ok(l)=>{listener=Some(l);break},
-            Err(_)=>thread::sleep(Duration::from_millis(150))
+            Err(_)=>thread::sleep(Duration::from_millis(200))
         }
     }
-    let listener=listener.ok_or("LOCAL_WEB_BIND_FAILED: port 8787 busy after restart")?;
+    let listener=listener.ok_or("LOCAL_WEB_BIND_FAILED: port 8787 busy after 20 second restart retry")?;
     thread::spawn(move ||{
         println!("LOCAL_WEB_READY http://127.0.0.1:8787");
         for client in listener.incoming(){
