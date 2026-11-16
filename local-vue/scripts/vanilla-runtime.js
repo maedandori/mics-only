@@ -15,13 +15,16 @@ export function onMounted(fn){active?.mounted.push(fn)}
 export function onUnmounted(fn){active?.cleanup.push(fn)}
 export function nextTick(fn){return new Promise(done=>requestAnimationFrame(()=>{fn?.();done()}))}
 const scope=(parent,fields)=>new Proxy(Object.assign(Object.create(parent||null),fields),{has(t,k){return k!==Symbol.unscopables&&k in t},get(t,k){if(k===Symbol.unscopables)return;const x=t[k];return x?.[REF]?x.value:x}});
-const exprs=new Map(),setters=new Map();
 function evaluate(code,ctx,event){
- try{let f=exprs.get(code);if(!f){f=new Function('s','$event','with(s){return ('+code+')}');exprs.set(code,f)}return f(ctx,event)}
- catch(e){console.warn('MICS expression:',code,e.message)}
+ const fn=window.MICS_EXPRESSIONS?.[code];
+ if(!fn){console.warn('MICS uncompiled template expression',code);return undefined}
+ try{return fn(ctx,event)}catch(e){console.warn('MICS expression failed',code,e.message);return undefined}
 }
 function run(code,ctx,event){const result=evaluate(code,ctx,event);if(typeof result==='function')result(event)}
-function assign(code,ctx,value){try{let f=setters.get(code);if(!f){f=new Function('s','v','with(s){'+code+'=v}');setters.set(code,f)}f(ctx,value)}catch(e){console.warn('MICS input:',code,e.message)}}
+function assign(code,ctx,value){
+ try{const fn=window.MICS_SETTERS?.[code];if(!fn)throw Error('Expression missing');fn(ctx,value)}
+ catch(e){console.warn('MICS input update failed',code,e.message)}
+}
 const interpolate=(s,ctx)=>s.replace(/{{([\s\S]*?)}}/g,(_,code)=>String(evaluate(code.trim(),ctx)??''));
 const cssClass=x=>Array.isArray(x)?x.map(cssClass).filter(Boolean).join(' '):x&&typeof x==='object'?Object.keys(x).filter(k=>x[k]).join(' '):String(x??'');
 const kebab=s=>s.replace(/[A-Z]/g,c=>'-'+c.toLowerCase());
