@@ -2,9 +2,9 @@ import { defineConfig } from 'vite'
 import { resolve } from 'node:path'
 export default defineConfig({
   root:'original',
-  base:'/vue-v0.2.12/',
+  base:'/vue-v0.2.13/',
   build:{
-    outDir:'../../www/vue-v0.2.12',
+    outDir:'../../www/vue-v0.2.13',
     emptyOutDir:true,
     assetsDir:'assets',
     rollupOptions:{
