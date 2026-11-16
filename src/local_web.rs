@@ -323,6 +323,13 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
             let kind=if route.ends_with(".js") {"application/javascript; charset=utf-8"}
                 else if route.ends_with(".css") {"text/css; charset=utf-8"}
                 else if route.ends_with(".json") {"application/json; charset=utf-8"}
+                else if route.ends_with(".svg") {"image/svg+xml"}
+                else if route.ends_with(".png") {"image/png"}
+                else if route.ends_with(".jpg") || route.ends_with(".jpeg") {"image/jpeg"}
+                else if route.ends_with(".webp") {"image/webp"}
+                else if route.ends_with(".woff2") {"font/woff2"}
+                else if route.ends_with(".woff") {"font/woff"}
+                else if route.ends_with(".ico") {"image/x-icon"}
                 else {"text/html; charset=utf-8"};
             let found=fs::read(file).ok();
             let is_found=found.is_some();
