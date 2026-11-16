@@ -343,9 +343,11 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     let route=path.split('?').next().unwrap_or("");
     let vue_dir=www_dir().join(concat!("vue-v",env!("CARGO_PKG_VERSION")));
     let vue_entry=vue_dir.join("index.html");
-    let legacy_ui=path.split("?").nth(1).is_some_and(|q|q.split("&").any(|v|v=="legacy=1"));
+    // Stable HTML/CSS/JS is the default. Vue is opt-in for debugging only.
+    let vue_opt_in=path.split("?").nth(1).is_some_and(|q|q.split("&").any(|v|v=="vue=1"));
+    let explicit_vue_asset=route.starts_with(concat!("/vue-v",env!("CARGO_PKG_VERSION"),"/"));
 
-    if !legacy_ui && vue_bundle_ready(&vue_dir) {
+    if (vue_opt_in || explicit_vue_asset) && vue_bundle_ready(&vue_dir) {
         let requested=if matches!(route,"/"|"/index.html"){
             Some(vue_entry.clone())
         }else if matches!(route,"/change-schedule.html"|"/status-colors.html"|"/change-aliases.html"){
@@ -397,7 +399,14 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     }
     let snapshot=||state.snapshot.lock().map(|v|v.clone()).unwrap_or(json!({}));
     let (status,kind,body,cache)=match path.split('?').next().unwrap_or("") {
-        "/"|"/index.html"=>("200 OK","text/html; charset=utf-8",load_www_file("index.html").unwrap_or_default(),"no-cache"),
+        "/"|"/index.html"=>{
+            // Keep the release marker for existing installed updaters which verify
+            // that this version's bundled assets exist after replacing the EXE.
+            let mut html=load_www_file("index.html").unwrap_or_default();
+            let marker=format!("<!-- vue-v{}/ installed; stable HTML interface active -->",env!("CARGO_PKG_VERSION"));
+            html.extend_from_slice(marker.as_bytes());
+            ("200 OK","text/html; charset=utf-8",html,"no-cache")
+        },
         "/vue-diagnostics.js"=>("200 OK","application/javascript; charset=utf-8",load_www_file("vue-diagnostics.js").unwrap_or_default(),"no-cache"),
         "/app.js"=>("200 OK","application/javascript; charset=utf-8",load_www_file("app.js").unwrap_or_default(),"no-cache"),
         "/style.css"=>("200 OK","text/css; charset=utf-8",load_www_file("style.css").unwrap_or_default(),"no-cache"),
