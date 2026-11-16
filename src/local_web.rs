@@ -343,11 +343,11 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     let route=path.split('?').next().unwrap_or("");
     let vue_dir=www_dir().join(concat!("vue-v",env!("CARGO_PKG_VERSION")));
     let vue_entry=vue_dir.join("index.html");
-    // Stable HTML/CSS/JS is the default. Vue is opt-in for debugging only.
-    let vue_opt_in=path.split("?").nth(1).is_some_and(|q|q.split("&").any(|v|v=="vue=1"));
+    // Original uploaded template is the default; manual legacy=1 remains available.
+    let legacy_opt_in=path.split("?").nth(1).is_some_and(|q|q.split("&").any(|v|v=="legacy=1"));
     let explicit_vue_asset=route.starts_with(concat!("/vue-v",env!("CARGO_PKG_VERSION"),"/"));
 
-    if (vue_opt_in || explicit_vue_asset) && vue_bundle_ready(&vue_dir) {
+    if (!legacy_opt_in || explicit_vue_asset) && vue_bundle_ready(&vue_dir) {
         let requested=if matches!(route,"/"|"/index.html"){
             Some(vue_entry.clone())
         }else if matches!(route,"/change-schedule.html"|"/status-colors.html"|"/change-aliases.html"){
