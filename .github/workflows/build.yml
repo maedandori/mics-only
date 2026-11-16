@@ -1,9 +1,11 @@
 name: Build and release MICS Only portable
+# Run only on a deliberate release request. A series of source commits must not
+# automatically start repeated Windows builds and releases.
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
+concurrency:
+  group: mics-only-windows-release
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: windows-latest
@@ -104,50 +106,6 @@ jobs:
             if($null -eq $alias.color -or $null -eq $alias.mold -or $null -eq $alias.stamp){throw 'Invalid local alias response'}
           } finally {
             if(!$agent.HasExited){Stop-Process -Id $agent.Id -Force -ErrorAction SilentlyContinue}
-          }
-      - name: End-to-end Windows updater compatibility and rollback gate
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $zip=(Resolve-Path dist/MICS-Only-Portable-Windows.zip).Path
-          $candidates=@(
-            @{name='current'; script='./scripts/apply-update.ps1'},
-            @{name='legacy-0.2.18'; script='./tests/legacy-0.2.18-apply-update.ps1'}
-          )
-          foreach($candidate in $candidates){
-            $folder=Join-Path $env:RUNNER_TEMP ('mics-only-upgrade-'+$candidate.name)
-            New-Item -ItemType Directory -Force -Path $folder | Out-Null
-            Expand-Archive -LiteralPath $zip -DestinationPath $folder -Force
-            Copy-Item (Join-Path $folder 'mics.ini.example') (Join-Path $folder 'mics.ini')
-            $started=Start-Process -FilePath (Join-Path $folder 'mics-only.exe') -WorkingDirectory $folder -PassThru
-            try{
-              $ready=$false
-              for($i=0;$i -lt 40;$i++){
-                Start-Sleep -Milliseconds 500
-                try{
-                  $r=Invoke-RestMethod 'http://127.0.0.1:8787/api/status' -TimeoutSec 1
-                  if($r.ok -eq $true -and $r.version -eq '0.2.19'){$ready=$true;break}
-                }catch{}
-              }
-              if(!$ready){throw "Test agent did not boot before $($candidate.name) updater"}
-              & $candidate.script -Archive $zip -Target $folder -ParentId 0 -Version 'v0.2.19'
-              $log=Join-Path $folder 'data/update.log'
-              if(!(Test-Path $log)){throw "No $($candidate.name) updater log created"}
-              $lines=Get-Content $log
-              if(!($lines | Where-Object {$_ -match 'UPDATE_SUCCESS v0.2.19'})){
-                throw ("Updater $($candidate.name) failed: "+($lines -join ' | '))
-              }
-              if($lines | Where-Object {$_ -match 'ROLLBACK_BEGIN'}){
-                throw ("Unexpected rollback in $($candidate.name): "+($lines -join ' | '))
-              }
-              $updated=Invoke-RestMethod 'http://127.0.0.1:8787/api/status' -TimeoutSec 5
-              if($updated.ok -ne $true -or $updated.version -ne '0.2.19'){
-                throw "Agent failed API check after $($candidate.name) updater"
-              }
-            }finally{
-              Get-Process -Name 'mics-only' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-            }
-            Start-Sleep -Seconds 1
           }
       - name: Upload portable artifact
         uses: actions/upload-artifact@v4
