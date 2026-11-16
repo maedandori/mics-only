@@ -1,17 +1,13 @@
 {
-  "name": "mics-only-local-vue",
+  "name": "mics-only-original-vanilla-template",
   "private": true,
-  "version": "0.2.19",
+  "version": "0.2.20",
   "type": "module",
   "scripts": {
-    "build": "node scripts/prepare-original.mjs && tailwindcss -c tailwind.config.cjs -i original/tailwind-input.css -o original/css/tailwind-generated.css --minify && vite build && node scripts/copy-default-json.mjs"
+    "build": "node scripts/build-vanilla.mjs && tailwindcss -c tailwind.config.cjs -i original/tailwind-input.css -o ../www/vue-v0.2.20/css/tailwind-generated.css --minify"
   },
-  "dependencies": {
-    "vue": "^3.5.0"
-  },
+  "dependencies": {},
   "devDependencies": {
-    "@vitejs/plugin-vue": "^5.2.0",
-    "vite": "^6.0.0",
     "tailwindcss": "^3.4.17"
   }
 }
