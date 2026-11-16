@@ -38,7 +38,29 @@ fn main() {
 
     let mut heading=nwg::Label::default();
     nwg::Label::builder().text("MICS Only | BACKUP Firebird Reader").parent(&window)
-        .position((24,15)).size((730,30)).build(&mut heading).unwrap();
+        .position((24,15)).size((380,30)).build(&mut heading).unwrap();
+
+    // Display both binary versions: after a rollback the Settings EXE may not
+    // match the currently running agent. Do not infer the agent version from
+    // the Settings binary. Probe the local endpoint with a strict timeout.
+    let running_version=ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_millis(800))
+        .build()
+        .get("http://127.0.0.1:8787/api/status")
+        .call().ok()
+        .and_then(|response|response.into_json::<serde_json::Value>().ok())
+        .and_then(|body|body["version"].as_str().map(str::to_owned))
+        .unwrap_or_else(||"offline".to_string());
+    let version_caption=format!(
+        "Settings v{}  |  Agent {}",
+        env!("CARGO_PKG_VERSION"),
+        if running_version=="offline" {running_version}
+        else {format!("v{running_version}")}
+    );
+    let mut version_label=nwg::Label::default();
+    nwg::Label::builder().text(&version_caption).parent(&window)
+        .position((413,15)).size((352,30))
+        .build(&mut version_label).unwrap();
 
     let mut enable=nwg::CheckBox::default();
     nwg::CheckBox::builder().text("Enable standby agent / 予備機を有効化").parent(&window)
@@ -380,7 +402,7 @@ fn main() {
         }
     });
     // Keep window-owned controls alive for the duration of the event loop.
-    let _controls=(heading,labels,secret_labels,note,status,test,open_web,start_agent,stop_agent,restart_agent,update_agent,save,close,enable,autostart,state,update_notice,update_text,update_bar);
+    let _controls=(heading,version_label,labels,secret_labels,note,status,test,open_web,start_agent,stop_agent,restart_agent,update_agent,save,close,enable,autostart,state,update_notice,update_text,update_bar);
     nwg::dispatch_thread_events();
 }
 #[cfg(not(windows))]
