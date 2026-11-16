@@ -18,4 +18,10 @@ for(const page of ['index.html','change-schedule.html','status-colors.html','cha
  const html=readFileSync(resolve(web,page),'utf8');
  assert.ok(!html.includes('vue.esm-browser')&&!html.includes('cdn.tailwindcss.com'),'External Vue/CDN reference: '+page);
 }
-console.log('PASS original machine nodes, schedule branches and vanilla JS assets');
+const css=readFileSync(resolve(web,'css/tailwind-generated.css'),'utf8');
+assert.ok(css.length>4000 && css.includes('.grid'), 'Current-version Tailwind stylesheet was not built');
+for(const page of ['index.html','change-schedule.html','status-colors.html','change-aliases.html']){
+ const html=readFileSync(resolve(web,page),'utf8');
+ assert.match(html, /css\/tailwind-generated\.css/, 'Original template stylesheet reference missing: '+page);
+}
+console.log('PASS machine/schedule branches, native JS assets, and current-version layout CSS');

@@ -10,7 +10,13 @@
       const content = (body.innerText || '').trim();
       const visible = [...body.querySelectorAll('main, #app, [id*="app"], [class*="dashboard"]')]
         .some(el => el.children.length > 2 && el.getBoundingClientRect().height > 50);
-      if (visible || content.length > 100) return;
+      // A valid shell can contain many characters while all machine nodes are missing.
+      // Do not call that success: the dashboard must contain machine-card content.
+      const dashboard = location.pathname === '/' || location.pathname === '/index.html';
+      const manualLegacy = new URLSearchParams(location.search).get('legacy') === '1';
+      const machineNodes = [...body.querySelectorAll('article, [class*="machine-card"], [class*="machine-node"], [class*="machine-tile"]')]
+        .filter(el => /\\d{1,2}\\s*号機/.test(el.textContent || ''));
+      if (manualLegacy || (dashboard && machineNodes.length) || (!dashboard && (visible || content.length > 100))) return;
       const card = document.createElement('aside');
       card.id = 'mics-boot-warning';
       card.style.cssText = 'position:fixed;z-index:2147483647;top:18px;left:18px;right:18px;max-width:720px;background:#fff;color:#111;border:2px solid #b91c1c;padding:18px;border-radius:12px;box-shadow:0 8px 25px #0004;font:16px/1.5 sans-serif';

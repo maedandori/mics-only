@@ -1,10 +1,10 @@
 {
   "name": "mics-only-original-vanilla-template",
   "private": true,
-  "version": "0.2.22",
+  "version": "0.2.23",
   "type": "module",
   "scripts": {
-    "build": "node scripts/build-vanilla.mjs && node scripts/verify-native-render.mjs && tailwindcss -c tailwind.config.cjs -i original/tailwind-input.css -o ../www/vue-v0.2.20/css/tailwind-generated.css --minify"
+    "build": "node scripts/build-vanilla.mjs && node scripts/verify-native-render.mjs"
   },
   "dependencies": {},
   "devDependencies": {

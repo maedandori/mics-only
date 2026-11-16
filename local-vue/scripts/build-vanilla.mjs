@@ -63,4 +63,10 @@ for(const page of ['index.html','change-schedule.html','status-colors.html','cha
  const html=readFileSync(join(output,page),'utf8');
  if(html.includes('cdn.tailwindcss.com')||html.includes('vue.esm-browser')||!html.includes('/'+base+'/js/'))throw Error('Standalone template verification failed: '+page);
 }
-console.log('Original four-page template converted to native JavaScript: '+base);
+// Generate Tailwind into this release's own directory, not an older version.
+const tailwind=resolve('node_modules','tailwindcss','lib','cli.js');
+execFileSync(process.execPath,[tailwind,'-c','tailwind.config.cjs','-i','original/tailwind-input.css',
+ '-o',join(output,'css','tailwind-generated.css'),'--minify'],{stdio:'inherit'});
+const generatedCss=readFileSync(join(output,'css','tailwind-generated.css'),'utf8');
+if(generatedCss.length<4000||!generatedCss.includes('.grid'))throw Error('Current-version Tailwind CSS missing or incomplete: '+base);
+console.log('Original four-page template converted to native JavaScript with current-version CSS: '+base);
