@@ -1,11 +1,13 @@
 name: Build and release MICS Only portable
-# Run only on a deliberate release request. A series of source commits must not
-# automatically start repeated Windows builds and releases.
+# One final build on the release commit. Concurrency prevents overlapping
+# Windows builds; superseded runs are cancelled.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 concurrency:
   group: mics-only-windows-release
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: windows-latest
