@@ -172,3 +172,18 @@ before publishing; the workflow is limited to one active release build.
 
 ### v0.2.21 conditional-chain fix
 The original template inserts HTML comments between `v-if` and `v-else-if` branches. The vanilla renderer now ignores those comments when choosing a branch, restoring machine cards and change-schedule rows. A build-time regression test checks the two original templates. The `vue-v0.2.21` directory name is retained solely for older updaters; Vue is not loaded.
+
+### v0.2.22 — No automatic rollback
+
+After a valid release is installed, `mics-only` will **never automatically
+replace the new EXE with the old one** if a subsequent health or web check
+fails. The installer keeps old binaries in `data/update-backup` solely for
+**manual recovery**, and records `UPDATE_FAILED_NO_ROLLBACK` in
+`data/update.log` when installation did not finish cleanly. Bad ZIPs are
+rejected before the old agent is stopped; ACTIVE agents are never interrupted.
+
+**Important:** the updater PowerShell script is embedded in the installed
+EXE. Upgrading from a version prior to v0.2.22 still uses its old updater,
+which can roll back. To switch to no-rollback behavior reliably, install the
+v0.2.22 portable EXEs manually once, retaining existing `mics.ini` and
+`data/` files. Subsequent updates use the new no-rollback installer.
