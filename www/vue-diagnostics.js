@@ -15,7 +15,7 @@
       card.id = 'mics-boot-warning';
       card.style.cssText = 'position:fixed;z-index:2147483647;top:18px;left:18px;right:18px;max-width:720px;background:#fff;color:#111;border:2px solid #b91c1c;padding:18px;border-radius:12px;box-shadow:0 8px 25px #0004;font:16px/1.5 sans-serif';
       const title = document.createElement('strong');
-      title.textContent = 'MICS-only: Vue interface failed to render / 画面表示エラー';
+      title.textContent = 'MICS-only: JavaScript template failed to render / 画面表示エラー';
       const detail = document.createElement('p');
       detail.textContent = (error || 'The page did not render. Check browser Console and network asset requests.').slice(0,500);
       const link = document.createElement('a');
