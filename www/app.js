@@ -2,6 +2,42 @@
 const order=[15,8,19,14,5,17,13,6,10,11,18,7,12,16],names={100:"段取り中",200:"稼働中",210:"サイクル注意",410:"金型異常",440:"色替え",490:"異常"};
 const $=id=>document.getElementById(id), esc=x=>String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 let current={machines:[]},schedule={rows:[]},week=0,filter="all",view="dashboard";
+let aliasMap={color:new Map(),mold:new Map(),stamp:new Map()};
+let aliasSignature="",aliasCheckedAt=0;
+const aliasKey=value=>String(value??"").normalize("NFKC").trim().replace(/\s+/g,"").toLowerCase();
+function canonicalAlias(kind,value){
+ const raw=String(value??"").trim();
+ return aliasMap[kind]?.get(aliasKey(raw))||raw;
+}
+async function refreshAliases(force=false){
+ if(!force&&Date.now()-aliasCheckedAt<60000)return;
+ aliasCheckedAt=Date.now();
+ try{
+  const response=await fetch("/api/ui-template/aliases",{cache:"no-store"});
+  if(!response.ok)throw Error("Local alias API HTTP "+response.status);
+  const config=await response.json();
+  if(!["color","mold","stamp"].every(kind=>Array.isArray(config?.[kind])))throw Error("Alias JSON invalid");
+  const signature=JSON.stringify(config);
+  if(signature===aliasSignature)return;
+  const next={color:new Map(),mold:new Map(),stamp:new Map()};
+  for(const kind of ["color","mold","stamp"]){
+   for(const row of config[kind]){
+    if(typeof row?.canonical!=="string"||!Array.isArray(row.aliases))continue;
+    for(const value of [row.canonical,...row.aliases]){
+     const key=aliasKey(value);
+     if(key&&!next[kind].has(key))next[kind].set(key,row.canonical);
+    }
+   }
+  }
+  aliasMap=next;aliasSignature=signature;
+  if(view==="schedule")drawSchedule();
+  if(view==="all")drawAll();
+ }catch(err){
+  // Keep the last known-good aliases. Production screen must not wait for D1.
+  console.warn("Alias cache unavailable:",err.message);
+ }
+}
+
 function status(code,name=""){const s=String(code??"").trim(),t=String(name??"");if(["410","440","490","300","0"].includes(s)||/停止|異常|クレーム/.test(t))return "danger";if(s==="100"||/段取り/.test(t))return "setup";if(s==="210"||/注意/.test(t))return "warning";if(s==="200"||/稼働中/.test(t))return "running";return ""}
 function num(n){return(Number(n)||0).toLocaleString("ja-JP")}
 // Subtle production warning: show one Japanese notice per machine with >20 defects.
@@ -163,9 +199,12 @@ const monday=(offset)=>{const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDa
 const parseDate=x=>new Date(String(x||"").replace(" ","T")+"+09:00");
 function classify(prev,cur){
  if(!prev)return "start";
- const moldKey=m=>String(m.mold_no||m.mold_name||"").replace(/-[A-Za-z0-9]+$/,"").trim();
- if(moldKey(prev)&&moldKey(cur)&&moldKey(prev)!==moldKey(cur))return "mold";
- if(String(prev.color||"")!==String(cur.color||""))return "color";
+ const moldKey=m=>{
+  const code=String(m.mold_no||"").replace(/-[A-Za-z0-9]+$/,"").trim();
+  return code||canonicalAlias("mold",m.mold_name||"");
+ };
+ if(moldKey(prev)&&moldKey(cur)&&aliasKey(moldKey(prev))!==aliasKey(moldKey(cur)))return "mold";
+ if(aliasKey(canonicalAlias("color",prev.color))!==aliasKey(canonicalAlias("color",cur.color)))return "color";
  return "same";
 }
 function drawSchedule(){
@@ -248,4 +287,4 @@ fullButton.addEventListener("click",async()=>{
 });
 document.addEventListener("fullscreenchange",updateFullscreenButton);
 updateFullscreenButton();
-refresh();setInterval(refresh,3000);if("serviceWorker"in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>{});
+refreshAliases(true);refresh();setInterval(refresh,3000);setInterval(refreshAliases,60000);if("serviceWorker"in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>{});
