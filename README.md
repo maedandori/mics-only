@@ -197,3 +197,8 @@ The original ZIP template uses `/data/machines.json` and `/data/schedule-local.j
 ### v0.2.25 — Restore machine cards and correct render warnings
 
 On each new page load the original template opens in grid mode, ignoring an old Gantt/list selection stored in the browser. Selecting Gantt explicitly waits for the saved local schedule JSON. The old SQLite table-name error is replaced with the name of the real local JSON file. Boot diagnostics inspect the actual `[data-machine]` cards and do not flag an intentionally card-free Gantt/list display. The Windows release build seeds fourteen local machine rows and checks rendered cards in a headless browser, instead of relying on HTTP status alone.
+
+
+### v0.2.26 — Faster local dashboard rendering
+
+The framework-free renderer now memoizes template computed expressions during each render, avoiding repeated calculations for every field of each machine card. The Dashboard reads machine JSON immediately; the larger local schedule is processed after the first paint and cached until it changes. Status/alias configuration refreshes in parallel instead of blocking node display. Unchanged machine JSON and settings do not trigger a full redraw. Schedule changes still update forecast displays, and the original 4-page template, data files, and no-rollback installer remain unchanged.

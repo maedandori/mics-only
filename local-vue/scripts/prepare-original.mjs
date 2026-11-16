@@ -29,6 +29,8 @@ if(start<0||end<0)throw Error('Original common.js loader not found');
 const localLoader=`// Fast local JSON loader. Browser never requests a production database.
 let lastMachineText = null, lastMachineData = null;
 let lastScheduleText = null, lastScheduleData = {rows:[]};
+let lastSchedulesText = undefined, lastSchedules = Object.create(null);
+let scheduleTimer = null;
 let lastNormalized = null, normalizedMachineText = null, normalizedScheduleText = null;
 let schedulePromise = null, scheduleRequestedAt = 0;
 async function refreshLocalSchedule() {
@@ -45,6 +47,8 @@ async function refreshLocalSchedule() {
     lastScheduleText = text;
     lastScheduleData = parsed;
     lastNormalized = null;
+    // Update next-change forecasts after initial cards are already visible.
+    window.dispatchEvent(new Event('mics-local-schedule-ready'));
   })().catch(error => console.warn('Local schedule cache retained:', error))
     .finally(() => {schedulePromise = null;});
   return schedulePromise;
@@ -73,9 +77,16 @@ export async function loadData(waitForSchedule = false) {
       lastMachineText = '__placeholder__';
     }
   }
-  const loadingSchedule = refreshLocalSchedule();
-  // The schedule page needs complete rows before its first render.
-  if (waitForSchedule || location.pathname.endsWith('/change-schedule.html')) await loadingSchedule;
+  // Delay large schedule parsing until after the first dashboard paint.
+  // A dedicated schedule page still awaits its local JSON immediately.
+  if (waitForSchedule || location.pathname.endsWith('/change-schedule.html')) {
+    await refreshLocalSchedule();
+  } else if (scheduleTimer === null) {
+    scheduleTimer = setTimeout(() => {
+      scheduleTimer = null;
+      void refreshLocalSchedule();
+    }, 750);
+  }
   // If both JSON files are unchanged, reuse the exact result object and skip
   // expensive normalization and unnecessary native-DOM redraws.
   if (lastNormalized && normalizedMachineText === lastMachineText &&
@@ -86,20 +97,27 @@ export async function loadData(waitForSchedule = false) {
     qty_ng: m.qty_ng_shift_status === 'mics_today' && Number.isFinite(Number(m.qty_ng_shift))
       ? Number(m.qty_ng_shift) : m.qty_ng,
   }));
-  const byMachine = new Map();
-  for (const row of lastScheduleData.rows) {
-    const key = Number(row.machine_no);
-    if (!byMachine.has(key)) byMachine.set(key, []);
-    byMachine.get(key).push(row);
+  // Expensive grouping/sorting of the 30-day schedule is only needed when
+  // schedule-local.json actually changes, not on every machine update.
+  if (lastSchedulesText !== lastScheduleText) {
+    const byMachine = new Map();
+    for (const row of lastScheduleData.rows) {
+      const key = Number(row.machine_no);
+      if (!byMachine.has(key)) byMachine.set(key, []);
+      byMachine.get(key).push(row);
+    }
+    const windows = [...byMachine].map(([machine_no, rows]) => ({
+      machine_no, rows_json: JSON.stringify(rows),
+      window_start: lastScheduleData.from || null,
+      window_end: lastScheduleData.to || null,
+      updated_at: lastScheduleData.sampled_at || null,
+    }));
+    lastSchedules = normalizeData([], windows).schedules;
+    lastSchedulesText = lastScheduleText;
   }
-  const windows = [...byMachine].map(([machine_no, rows]) => ({
-    machine_no, rows_json: JSON.stringify(rows),
-    window_start: lastScheduleData.from || null,
-    window_end: lastScheduleData.to || null,
-    updated_at: lastScheduleData.sampled_at || null,
-  }));
-  lastNormalized = {...normalizeData(machines, windows), source:'MICS-only direct local JSON',
-    loadedAt:new Date().toISOString(),live:true};
+  lastNormalized = {machines: machines.slice().sort(compareMachineNo),
+    schedules: lastSchedules, source:'MICS-only direct local JSON',
+    loadedAt:new Date().toISOString(), live:true};
   normalizedMachineText = lastMachineText;
   normalizedScheduleText = lastScheduleText;
   return lastNormalized;
@@ -160,6 +178,21 @@ replaceDashboard(`    function setView(v) {
 replaceDashboard('file ? loadFromFile(file) : loadData(),',"file ? loadFromFile(file) : loadData(state.view === 'gantt'),");
 replaceDashboard('日程データ (mics_schedule_week) がありません。',
  '日程データ (data/schedule-local.json) がありません。保存された予定を確認してください。');
+// Replace the original blocking loader: node data must not wait for alias/status
+// requests, and unchanged JSON must not redraw all fourteen cards.
+const loadStart=dashboard.indexOf('    async function load(file = null) {');
+const loadEnd=dashboard.indexOf('    function onStorage(e) {',loadStart);
+if(loadStart<0||loadEnd<=loadStart)throw Error('Original dashboard load function not found');
+const optimizedLoad="    let configLoading = false, lastConfigFingerprint = '';\n    async function refreshConfiguration() {\n      if (configLoading) return;\n      configLoading = true;\n      try {\n        const [cfg, aliasCfg] = await Promise.all([loadStatusConfig(), loadAliasConfig()]);\n        const fingerprint = JSON.stringify([cfg, aliasCfg]);\n        if (fingerprint !== lastConfigFingerprint) {\n          lastConfigFingerprint = fingerprint;\n          state.cfg = cfg;\n          state.aliasCfg = aliasCfg;\n        }\n      } catch (error) {\n        console.warn('Local settings retained:', error);\n      } finally { configLoading = false; }\n    }\n    let loadBusy = false;\n    async function load(file = null) {\n      if (loadBusy) return;\n      loadBusy = true;\n      // Do not hide existing nodes while polling unchanged JSON.\n      if (!state.data) state.sourceText = '読み込み中…';\n      if (state.errorMsg) state.errorMsg = '';\n      // The tiny machine JSON takes priority; settings load in parallel.\n      void refreshConfiguration();\n      try {\n        const data = await (file ? loadFromFile(file) : loadData(state.view === 'gantt'));\n        if (data !== state.data) {\n          state.data = data;\n          state.sourceText = data.source + ' · ' + fmtDT(new Date(data.loadedAt));\n        }\n        clearInterval(refreshTimer);\n        if (data.live) refreshTimer = setInterval(() => load(), 60000);\n        if (file) pushToast(file.name + ' を読み込みました', 'ok');\n      } catch (e) {\n        console.error(e);\n        state.sourceText = '読み込みエラー';\n        state.errorMsg = e.message;\n        pushToast(e.message, 'err');\n      } finally { loadBusy = false; }\n    }\n";
+dashboard=dashboard.slice(0,loadStart)+optimizedLoad+dashboard.slice(loadEnd);
+const scheduleReadyHandler="    function onLocalScheduleReady() { if (state.view === 'grid' || state.view === 'table') void load(); }\n";
+const handlerTarget='    function onStorage(e) {';
+if(!dashboard.includes(handlerTarget))throw Error('Dashboard storage handler not found');
+dashboard=dashboard.replace(handlerTarget,scheduleReadyHandler+handlerTarget);
+dashboard=dashboard.replace("      window.addEventListener('storage', onStorage);",
+ "      window.addEventListener('storage', onStorage);\n      window.addEventListener('mics-local-schedule-ready', onLocalScheduleReady);");
+dashboard=dashboard.replace("      window.removeEventListener('storage', onStorage);",
+ "      window.removeEventListener('storage', onStorage);\n      window.removeEventListener('mics-local-schedule-ready', onLocalScheduleReady);");
 writeFileSync(dashboardPath,dashboard);
 
 const aliasAppPath=resolve(root,'js/change-aliases-app.js');

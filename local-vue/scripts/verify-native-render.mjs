@@ -34,4 +34,11 @@ assert.match(dashboard,/loadData\(state.view === 'gantt'\)/,'Gantt should wait f
 assert.match(dashboard,/data\/schedule-local\.json/,'Old SQL table message should be replaced');
 const diagnostics=readFileSync(resolve('../www','vue-diagnostics.js'),'utf8');
 assert.match(diagnostics,/querySelectorAll\('\[data-machine\]'\)/,'Diagnostics should use actual node attributes');
-console.log('PASS original nodes, default grid, local schedule, accurate diagnostics and CSS');
+assert.match(runtime,/renderCycle/,'Native DOM must memoize computed per render');
+assert.match(runtime,/lastCycle!==app\.renderCycle/,'Computed should not recompute for each node field');
+assert.match(loader,/scheduleTimer = setTimeout/,'Initial dashboard must defer large schedule processing');
+assert.match(loader,/lastSchedulesText !== lastScheduleText/,'Unchanged schedules must reuse normalized groups');
+assert.match(dashboard,/configLoading/,'Settings must not block first machine render');
+assert.match(dashboard,/if \(data !== state\.data\)/,'Unchanged machine data must avoid full node redraw');
+assert.match(dashboard,/mics-local-schedule-ready/,'Schedule updates must refresh forecasts');
+console.log('PASS original nodes, cached computations, first-paint JSON loading, diagnostics and CSS');

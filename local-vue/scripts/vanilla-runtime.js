@@ -4,7 +4,16 @@ let active=null;
 const REF=Symbol('ref'), proxies=new WeakMap(), jobs=new WeakSet();
 const later=app=>{if(!app||jobs.has(app))return;jobs.add(app);requestAnimationFrame(()=>{jobs.delete(app);app.render()})};
 export function ref(value){const app=active;return {[REF]:1,get value(){return value},set value(v){if(value!==v){value=v;if(!(v instanceof Node))later(app)}}}}
-export function computed(fn){return {[REF]:1,get value(){return fn()}}}
+// Memoize computed expressions for one render. The original template accesses
+// metricsByMachine dozens of times per card; recomputing it each time is costly.
+export function computed(fn){
+ const app=active;let lastCycle=-1,cached;
+ return {[REF]:1,get value(){
+  if(!app||!app.rendering)return fn();
+  if(lastCycle!==app.renderCycle){cached=fn();lastCycle=app.renderCycle;}
+  return cached;
+ }};
+}
 export function reactive(obj){const app=active;const wrap=x=>{
  if(!x||typeof x!=='object'||x instanceof Date||x instanceof Map||x instanceof Set||x[REF])return x;
  if(proxies.has(x))return proxies.get(x);
@@ -118,13 +127,16 @@ function render(node,ctx,app,path,slot){
  return el;
 }
 export function createApp(component){
- const app={components:{},instances:new Map(),mounted:[],cleanup:[],render:()=>{}};
+ const app={components:{},instances:new Map(),mounted:[],cleanup:[],render:()=>{},renderCycle:0,rendering:false};
  for(const [name,definition] of Object.entries(component.components||{}))app.components[name.replace(/([a-z])([A-Z])/g,'$1-$2').toLowerCase()]=definition;
  return {mount(selector){
   const root=document.querySelector(selector);if(!root)throw Error('MICS template root missing');
   const saved=active;active=app;let state;try{state=component.setup?.()||{}}finally{active=saved}
   const ctx=scope(null,state),markup=parse(component.template);
   app.render=()=>{
+   app.renderCycle++;
+   app.rendering=true;
+   try{
    const focus=document.activeElement,focusId=focus?.id,position=focus&&typeof focus.selectionStart==='number'?focus.selectionStart:null;
    const path=[];let cursor=focus;
    while(cursor&&cursor!==root&&root.contains(cursor)){
@@ -139,6 +151,7 @@ export function createApp(component){
    }
    if(next&&typeof next.focus==='function'){next.focus({preventScroll:true});if(position!=null)try{next.setSelectionRange(position,position)}catch{}}
    window.scrollTo(x,y);
+   }finally{app.rendering=false;}
   };
   app.render();for(const fn of app.mounted.splice(0)){try{fn()}catch(e){console.error('MICS mount',e)}}
   window.addEventListener('beforeunload',()=>{for(const fn of app.cleanup)try{fn()}catch{}});
