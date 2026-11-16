@@ -233,7 +233,7 @@ fn main() {
                         match result {
                             Ok(summary)=>{
                                 if summary.starts_with("UPDATE_STAGED ") {
-                                    nwg::simple_message("GitHub Update",&format!("{summary}\nThe installer continues after Settings closes. Check data\\update.log for install/rollback result."));
+                                    nwg::simple_message("GitHub Update",&format!("{summary}\nThe installer continues after Settings closes. Check data\\update.log for installation result."));
                                     nwg::stop_thread_dispatch();
                                 }else{nwg::simple_message("GitHub Update",&summary);}
                             },
