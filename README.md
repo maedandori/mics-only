@@ -146,3 +146,26 @@ Important correction: for machine 19, the SQL-confirmed values were `MACHINEWORK
 The active Firebird reader now reads TODAYQTYNG explicitly and sends `qty_ng_shift` with `qty_ng_shift_status=mics_today`. Dashboard uses it for NG display, fire animation, and warnings; cumulative `qty_ng` remains below for context. No subtractive estimate is used. If the machine is MIRROR_ONLY/STANDBY and its upstream snapshot lacks TODAYQTYNG, current-period NG displays "—" rather than a misleading zero. The upstream primary agent must supply TODAYQTYNG for a correct standby display.
 
 MICS owns the current-period reset. Do not force 19:00 or 19:30 time boundaries in the Local Web: previously observed MICS SYSDEFINE shift settings included 07:30 and 19:30, and the server may use its own counters.
+
+
+## v0.2.20 — Original template, browser-native JavaScript
+
+The original uploaded four-page MICS UI is retained: dashboard, change schedule,
+status colors, and alias editor. Its original HTML markup and CSS classes are
+preserved. Vue/Vite and their browser dependencies are removed: a lightweight
+native JavaScript renderer evaluates precompiled, trusted template expressions
+without browser eval or remote scripts. Tailwind CSS is compiled at release
+build time (no Tailwind CDN on installed PCs).
+
+The EXE serves `www/vue-v0.2.20/index.html` as the default localhost page.
+Legacy dashboard remains available via `/?legacy=1`.
+JSON is sourced only from the local executable endpoints:
+`/api/machines` (data/machines.json),
+`/api/schedule` (data/schedule-local.json), and
+`/api/ui-template/aliases` (data/change-aliases.json).
+The EXE alone authenticates to D1 using the saved Coordinator Token.
+
+The versioned directory name `vue-v0.2.20` remains **only as a compatibility
+path** so updater scripts embedded in prior 0.2.x EXEs can copy the files.
+The website does not load Vue. Releases are checked on Windows by GitHub Actions
+before publishing; the workflow is limited to one active release build.
