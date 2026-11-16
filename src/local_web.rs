@@ -327,10 +327,11 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
             receive_template_json(&mut stream,&buf[..n],state,route);
             return
         }
-        // Never block initial HTML/JS rendering while the Cloudflare alias service
-        // authenticates. The next GET uses the freshly cached file on disk.
+        // Browser reads only local JSON; Cloudflare is handled by the agent thread.
         let fallback=www_dir().join(concat!("vue-v",env!("CARGO_PKG_VERSION"))).join("data").join(name);
-        let raw=fs::read(file).or_else(|_|fs::read(fallback)).unwrap_or_else(|_|b"{}".to_vec());
+        let raw=fs::read(file).or_else(|_|fs::read(fallback)).unwrap_or_else(|_|
+            if name=="change-aliases.json"{b"{\"color\":[],\"mold\":[],\"stamp\":[]}".to_vec()}
+            else{b"{\"default\":{},\"codes\":{}}".to_vec()});
         reply(&mut stream,"200 OK","application/json; charset=utf-8",if method=="HEAD"{&[]}else{&raw},"no-store");
         return
     }
