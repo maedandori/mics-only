@@ -53,6 +53,9 @@ try {
   Get-Process -Name 'mics-only' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction Stop
   Start-Sleep -Milliseconds 700
   New-Item -ItemType Directory -Path $backup -Force | Out-Null
+  # Never restore stale web files from an earlier update attempt.
+  $webBackup=Join-Path $backup 'www'
+  if(Test-Path -LiteralPath $webBackup){Remove-Item -LiteralPath $webBackup -Recurse -Force}
   foreach($name in $names){
     $src=Join-Path $Target $name
     if(!(Test-Path -LiteralPath $src)){throw "Current $name missing"}
@@ -71,14 +74,22 @@ try {
   if(Test-Path -LiteralPath $vueDest){Remove-Item -LiteralPath $vueDest -Recurse -Force}
   New-Item -ItemType Directory -Path (Split-Path $vueDest) -Force | Out-Null
   Copy-Item -LiteralPath $vueSrc -Destination $vueDest -Recurse -Force
-  $vueIndex=Get-Content -LiteralPath (Join-Path $vueDest 'index.html') -Raw
-  if($vueIndex -notmatch 'assets/'){throw 'Vue asset paths missing'}
-  # Verify every referenced JS/CSS asset, not just the Vue index.html.
-  $assetRefs=[regex]::Matches($vueIndex, '(?:src|href)="/vue-[^"/]+/(assets/[^"?]+)"')
-  if($assetRefs.Count -eq 0){throw 'Vue JS/CSS references missing'}
-  foreach($assetRef in $assetRefs){
-    $relative=$assetRef.Groups[1].Value
-    if($relative.Contains('..') -or !(Test-Path -LiteralPath (Join-Path $vueDest $relative))){throw "Vue asset missing: $relative"}
+  # Missing template assets are an interface issue, NOT a reason to
+  # downgrade a healthy executable. Rust serves the stable fallback HTML.
+  $templateWarnings=@()
+  $assetRefs=@()
+  try{
+    $vueIndex=Get-Content -LiteralPath (Join-Path $vueDest 'index.html') -Raw
+    if($vueIndex -notmatch 'assets/'){throw 'Template index has no assets'}
+    $assetRefs=[regex]::Matches($vueIndex, '(?:src|href)="/vue-[^"/]+/(assets/[^"?]+)"')
+    if($assetRefs.Count -eq 0){throw 'Template JS/CSS references missing'}
+    foreach($assetRef in $assetRefs){
+      $relative=$assetRef.Groups[1].Value
+      if($relative.Contains('..') -or !(Test-Path -LiteralPath (Join-Path $vueDest $relative))){throw "Template file missing: $relative"}
+    }
+  }catch{
+    $templateWarnings+= $_.Exception.Message
+    Log "WEB_WARNING $($_.Exception.Message)"
   }
   # Legacy HTML/CSS/JS is the default UI. Ship the exact files used by this
   # release, while retaining a backup for rollback.
@@ -104,19 +115,25 @@ try {
   }
   if(!$healthy){throw 'New agent health/version check failed'}
   Log 'UPDATE_STAGE 90 Agent API health verified'
-  $page=Invoke-WebRequest -Uri 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 4
-  if($page.StatusCode -ne 200 -or $page.Content -notlike ('*'+$vueName+'/*')){
-    throw 'Uploaded template not served as default'
-  }
-  $moduleCheck=Invoke-WebRequest -Uri 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 4
-  foreach($assetRef in $assetRefs){
-    $url='http://127.0.0.1:8787/'+$vueName+'/'+$assetRef.Groups[1].Value
-    $assetCheck=Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 4
-    if($assetCheck.StatusCode -ne 200 -or $assetCheck.Content.Length -lt 20){throw "Template asset unavailable: $url"}
+  # Web problems should not rollback a working agent. Probe the actual HTML
+  # and assets, retain the EXE, and make any UI failure visible in update.log.
+  try{
+    $page=Invoke-WebRequest -Uri 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 4
+    if($page.StatusCode -ne 200){throw 'Default page not HTTP 200'}
+    if($page.Content -notlike ('*'+$vueName+'/*')){throw 'Template not selected as default; stable fallback is active'}
+    foreach($assetRef in $assetRefs){
+      $url='http://127.0.0.1:8787/'+$vueName+'/'+$assetRef.Groups[1].Value
+      $assetCheck=Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 4
+      if($assetCheck.StatusCode -ne 200 -or $assetCheck.Content.Length -lt 20){throw "Template asset unavailable: $url"}
+    }
+  }catch{
+    $templateWarnings+= $_.Exception.Message
+    Log "WEB_WARNING $($_.Exception.Message)"
   }
   Remove-Item -LiteralPath (Join-Path $Target 'data\update-blocked-version.txt') -Force -ErrorAction SilentlyContinue
   Log "UPDATE_STAGE 100 Local web verified"
-  Log "UPDATE_SUCCESS $Version"
+  if($templateWarnings.Count -gt 0){Log "UPDATE_SUCCESS_WITH_WEB_WARNING $Version details=$($templateWarnings -join '; ')"}
+  else{Log "UPDATE_SUCCESS $Version"}
   # Keep backup until next successful update, for emergency manual recovery.
 }catch{
   Log "UPDATE_FAILED $($_.Exception.Message)"
