@@ -82,11 +82,7 @@ function render(node,ctx,app,path,slot){
  const el=document.createElement(tag);
  for(const a of node.attributes){const name=a.name,val=a.value;
   if(name==='ref'){let obj=ctx;let item;while(obj&&!item){item=Object.getOwnPropertyDescriptor(obj,val)?.value;obj=Object.getPrototypeOf(obj)}if(item?.[REF])item.value=el;continue}
-  if(name==='v-model'){
-   let value=evaluate(val,ctx);if(el.type==='checkbox')el.checked=!!value;else el.value=value??'';
-   el.addEventListener(el.tagName==='SELECT'||el.type==='checkbox'?'change':'input',()=>{assign(val,ctx,el.type==='checkbox'?el.checked:el.value);later(app)});
-   continue;
-  }
+  if(name==='v-model')continue;
   if(name.startsWith('@')){const [kind,...mods]=name.slice(1).split('.');
    el.addEventListener(kind,event=>{if(mods.includes('enter')&&event.key!=='Enter')return;
     if(mods.includes('prevent'))event.preventDefault();if(mods.includes('stop'))event.stopPropagation();
@@ -102,7 +98,13 @@ function render(node,ctx,app,path,slot){
   if(name.startsWith('v-')||name.startsWith('#'))continue;el.setAttribute(name,val);
  }
  el.appendChild(children(node.childNodes,ctx,app,path,slot));
- if(el.tagName==='SELECT'&&node.hasAttribute('v-model'))el.value=evaluate(node.getAttribute('v-model'),ctx)??'';
+ if(node.hasAttribute('v-model')){
+  const model=node.getAttribute('v-model'),current=evaluate(model,ctx);
+  if(el.type==='checkbox')el.checked=!!current;else el.value=current??'';
+  el.addEventListener(el.tagName==='SELECT'||el.type==='checkbox'?'change':'input',()=>{
+   assign(model,ctx,el.type==='checkbox'?el.checked:el.value);later(app);
+  });
+ }
  return el;
 }
 export function createApp(component){
@@ -114,9 +116,18 @@ export function createApp(component){
   const ctx=scope(null,state),markup=parse(component.template);
   app.render=()=>{
    const focus=document.activeElement,focusId=focus?.id,position=focus&&typeof focus.selectionStart==='number'?focus.selectionStart:null;
+   const path=[];let cursor=focus;
+   while(cursor&&cursor!==root&&root.contains(cursor)){
+    const parent=cursor.parentElement;if(!parent)break;
+    path.unshift(Array.prototype.indexOf.call(parent.children,cursor));cursor=parent;
+   }
    const x=window.scrollX,y=window.scrollY;
    root.replaceChildren(children(markup.childNodes,ctx,app,'root',null));
-   if(focusId){const next=document.getElementById(focusId);if(next){next.focus({preventScroll:true});if(position!=null)try{next.setSelectionRange(position,position)}catch{}}}
+   let next=focusId?document.getElementById(focusId):null;
+   if(!next&&cursor===root&&path.length){
+    next=root;for(const i of path){next=next?.children[i];if(!next)break}
+   }
+   if(next&&typeof next.focus==='function'){next.focus({preventScroll:true});if(position!=null)try{next.setSelectionRange(position,position)}catch{}}
    window.scrollTo(x,y);
   };
   app.render();for(const fn of app.mounted.splice(0)){try{fn()}catch(e){console.error('MICS mount',e)}}
