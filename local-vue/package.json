@@ -1,7 +1,7 @@
 {
   "name": "mics-only-local-vue",
   "private": true,
-  "version": "0.2.11",
+  "version": "0.2.12",
   "type": "module",
   "scripts": {
     "build": "node scripts/prepare-original.mjs && tailwindcss -c tailwind.config.cjs -i original/tailwind-input.css -o original/css/tailwind-generated.css --minify && vite build && node scripts/copy-default-json.mjs"
