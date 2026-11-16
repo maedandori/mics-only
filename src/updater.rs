@@ -84,7 +84,7 @@ pub fn install_with_progress(exe:&Path,mut progress:impl FnMut(u32,&str))->Resul
    return Err("Release ZIP SHA256 mismatch".into())
   }
  }
- progress(94,"Download verified; preparing rollback updater");
+ progress(94,"Download verified; preparing installer without automatic rollback");
  let script=dir.join("apply-update.ps1");
  fs::write(&script,include_str!("../scripts/apply-update.ps1")).map_err(|e|e.to_string())?;
  Command::new("powershell.exe")
@@ -95,7 +95,7 @@ pub fn install_with_progress(exe:&Path,mut progress:impl FnMut(u32,&str))->Resul
   .creation_flags(CREATE_NO_WINDOW).spawn()
   .map_err(|e|format!("Cannot start update helper: {e}"))?;
  progress(100,"Package ready; Settings will close to install");
- Ok(format!("UPDATE_STAGED {tag}; closing parent to apply and verify, rollback on failure"))
+ Ok(format!("UPDATE_STAGED {tag}; closing parent to apply and verify, no automatic rollback; see data/update.log on failure"))
 }
 
 #[cfg(test)]
