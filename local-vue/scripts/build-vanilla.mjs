@@ -3,6 +3,7 @@
 import {readFileSync,writeFileSync,cpSync,mkdirSync,rmSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {execFileSync} from 'node:child_process';
+import {Script} from 'node:vm';
 import './prepare-original.mjs';
 const pkg=JSON.parse(readFileSync('package.json','utf8'));
 if(!/^\d+\.\d+\.\d+$/.test(pkg.version))throw Error('Invalid version');
@@ -12,6 +13,33 @@ cpSync('original',output,{recursive:true});
 mkdirSync(join(output,'assets'),{recursive:true});
 writeFileSync(join(output,'assets','compat.js'),'/* Native MICS HTML/JS compatibility asset. No Vue runtime. */\n');
 writeFileSync(join(output,'assets','compat.css'),'/* Native template, styles generated from original Tailwind classes. */\n');
+
+// Compile template expressions at build time as classic JavaScript functions.
+// This preserves the original declarative HTML without runtime eval/new Function
+// and works under the existing Content-Security-Policy script-src 'self'.
+const expressions=new Set(),setters=new Set();
+for(const name of ['dashboard-app.js','change-schedule-app.js','status-colors-app.js','change-aliases-app.js','components.js']){
+ const source=readFileSync(join(output,'js',name),'utf8');
+ const attr=/(?:v-if|v-else-if|v-for|v-model|:[\w-]+|@[\w.-]+)\s*=\s*"([^"]*)"/g;
+ for(const match of source.matchAll(attr)){
+  const value=match[1].trim();
+  if(match[0].startsWith('v-model'))setters.add(value);
+  const loop=value.match(/^\s*(?:\(([^)]+)\)|[\w$]+)\s+(?:in|of)\s+([\s\S]+)$/);
+  expressions.add(loop?loop[2].trim():value);
+ }
+ for(const match of source.matchAll(/{{([\s\S]*?)}}/g))expressions.add(match[1].trim());
+}
+const exprCode=['/* Compiled from trusted original MICS templates at build time. */',
+ 'window.MICS_EXPRESSIONS=Object.create(null);','window.MICS_SETTERS=Object.create(null);'];
+for(const value of expressions){
+ // Every expression remains local and must parse before release.
+ exprCode.push('window.MICS_EXPRESSIONS['+JSON.stringify(value)+']=function(s,$event){with(s){return ('+value+')}};');
+}
+for(const value of setters)exprCode.push('window.MICS_SETTERS['+JSON.stringify(value)+']=function(s,v){with(s){'+value+'=v}};');
+const compiled=exprCode.join('\n')+'\n';
+new Script(compiled,{filename:'compiled-expressions.js'});
+writeFileSync(join(output,'assets','compiled-expressions.js'),compiled);
+
 writeFileSync(join(output,'js','vanilla-runtime.js'),readFileSync('scripts/vanilla-runtime.js','utf8'));
 for(const page of ['index.html','change-schedule.html','status-colors.html','change-aliases.html']){
  const file=join(output,page);
@@ -19,7 +47,7 @@ for(const page of ['index.html','change-schedule.html','status-colors.html','cha
  html=html.replaceAll(' (Vue 3)',' (JavaScript)').replaceAll(' v-cloak','');
  html=html.replace(/href="css\//g,'href="/'+base+'/css/');
  html=html.replace(/src="js\//g,'src="/'+base+'/js/');
- html=html.replace('</head>','<link rel="stylesheet" href="/'+base+'/assets/compat.css" />\n<script src="/'+base+'/assets/compat.js"></script>\n</head>');
+ html=html.replace('</head>','<link rel="stylesheet" href="/'+base+'/assets/compat.css" />\n<script src="/'+base+'/assets/compiled-expressions.js"></script>\n<script src="/'+base+'/assets/compat.js"></script>\n</head>');
  writeFileSync(file,html);
 }
 for(const name of ['dashboard-app.js','change-schedule-app.js','status-colors-app.js','change-aliases-app.js','components.js']){
