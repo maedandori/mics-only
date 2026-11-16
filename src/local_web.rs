@@ -11,6 +11,8 @@ pub struct LocalState {
     pub last_sync_at: Arc<Mutex<Option<String>>>,
     pub alias_cloud: Arc<Mutex<Option<(String,String)>>>,
     pub alias_last_check: Arc<Mutex<Option<Instant>>>,
+    pub alias_sync_status: Arc<Mutex<String>>,
+    pub alias_last_sync_at: Arc<Mutex<Option<String>>>,
 }
 impl LocalState {
     pub fn new(data_path:PathBuf)->Self {
@@ -38,7 +40,9 @@ impl LocalState {
             .unwrap_or_else(||json!({"source":"mics-only","machines":[],"sampled_at":null}));
         Self{snapshot:Arc::new(Mutex::new(initial)),mode:Arc::new(Mutex::new("STANDBY".into())),
             sync_status:Arc::new(Mutex::new("NOT_SYNCED".into())),last_sync_at:Arc::new(Mutex::new(None)),
-            alias_cloud:Arc::new(Mutex::new(None)),alias_last_check:Arc::new(Mutex::new(None)),data_path}
+            alias_cloud:Arc::new(Mutex::new(None)),alias_last_check:Arc::new(Mutex::new(None)),
+            alias_sync_status:Arc::new(Mutex::new("NOT_CHECKED".into())),
+            alias_last_sync_at:Arc::new(Mutex::new(None)),data_path}
     }
     pub fn set_alias_sync(&self,coordinator_url:&str,token:&str){
         if coordinator_url.starts_with("https://") && !token.is_empty(){
@@ -133,28 +137,68 @@ fn template_settings_file(state:&LocalState,route:&str)->Option<(PathBuf,&'stati
 fn alias_cloud_credentials(state:&LocalState)->Option<(String,String)> {
     state.alias_cloud.lock().ok().and_then(|c|c.clone())
 }
+// The executable owns all Cloudflare D1 access. Browser requests always use
+// the on-disk cache and never wait for login/token/network.
+fn record_alias_status(state:&LocalState,status:&str){
+    if let Ok(mut v)=state.alias_sync_status.lock(){*v=status.to_owned();}
+    if status=="SYNCED" {
+        if let Ok(mut t)=state.alias_last_sync_at.lock(){
+            *t=Some(chrono::Utc::now().to_rfc3339());
+        }
+    }
+}
 fn fetch_cloud_alias(state:&LocalState) {
-    // Only a UI request triggers the 60-second refresh. No extra Firebird or
-    // machine snapshot request; agent coordinator heartbeat is unaffected.
+    // Independent background worker: at most one request per minute per PC.
     let refresh=state.alias_last_check.lock().ok().map(|mut last|{
         if last.as_ref().is_some_and(|t|t.elapsed()<Duration::from_secs(60)){false}
         else{*last=Some(Instant::now());true}
     }).unwrap_or(false);
     if !refresh{return}
-    let Some((url,token))=alias_cloud_credentials(state) else{return};
+    let Some((url,token))=alias_cloud_credentials(state) else {
+        record_alias_status(state,"NOT_CONFIGURED");
+        return
+    };
     let response=ureq::AgentBuilder::new().timeout(Duration::from_secs(6)).build()
         .get(&url).set("Authorization",&format!("Bearer {token}")).call();
-    if let Ok(resp)=response{
-        let mut bytes=Vec::new();
-        let reader=resp.into_reader();
-        let _=reader.take(128*1024+1).read_to_end(&mut bytes);
-        if bytes.len()<=128*1024 && !bytes.is_empty(){
-            let path=state.data_path.with_file_name("change-aliases.json");
-            if fs::read(&path).ok().as_deref()!=Some(bytes.as_slice()){
-                let _=save_template_json(&path,&bytes,"change-aliases.json");
+    match response {
+        Ok(resp)=>{
+            let mut bytes=Vec::new();
+            if resp.into_reader().take(128*1024+1).read_to_end(&mut bytes).is_err(){
+                record_alias_status(state,"NETWORK_ERROR");
+                return
             }
-        }
+            let path=state.data_path.with_file_name("change-aliases.json");
+            // Always validate the D1 payload, even if unchanged. Do not replace
+            // known-good aliases with a login page, invalid JSON or empty data.
+            if let Err(e)=validate_template_json(&bytes,"change-aliases.json"){
+                eprintln!("ALIAS_SYNC_INVALID_JSON {e}");
+                record_alias_status(state,"INVALID_DATA");
+                return
+            }
+            if fs::read(&path).ok().as_deref()!=Some(bytes.as_slice()){
+                if let Err(e)=save_template_json(&path,&bytes,"change-aliases.json"){
+                    eprintln!("ALIAS_SYNC_CACHE_FAILED {e}");
+                    record_alias_status(state,"CACHE_ERROR");
+                    return
+                }
+            }
+            record_alias_status(state,"SYNCED");
+        },
+        Err(ureq::Error::Status(401|403,_))=>record_alias_status(state,"AUTH_FAILED"),
+        Err(ureq::Error::Status(code,_))=>{
+            eprintln!("ALIAS_SYNC_HTTP_{code}");
+            record_alias_status(state,"HTTP_ERROR");
+        },
+        Err(_)=>record_alias_status(state,"NETWORK_ERROR")
     }
+}
+pub fn start_alias_sync(state:LocalState){
+    thread::spawn(move ||{
+        loop{
+            fetch_cloud_alias(&state);
+            thread::sleep(Duration::from_secs(60));
+        }
+    });
 }
 fn put_cloud_alias(state:&LocalState,body:&[u8])->Result<(),String>{
     let (url,token)=alias_cloud_credentials(state)
@@ -171,13 +215,14 @@ fn put_cloud_alias(state:&LocalState,body:&[u8])->Result<(),String>{
             let path=state.data_path.with_file_name("change-aliases.json");
             save_template_json(&path,body,"change-aliases.json")?;
             if let Ok(mut last)=state.alias_last_check.lock(){*last=Some(Instant::now());}
+            record_alias_status(state,"SYNCED");
             Ok(())
         }
         Ok(resp)=>Err(format!("Cloudflare alias sync HTTP {}",resp.status())),
         Err(e)=>Err(format!("Cloudflare alias sync unavailable: {e}"))
     }
 }
-fn save_template_json(dest:&Path,bytes:&[u8],name:&str)->Result<(),String>{
+fn validate_template_json(bytes:&[u8],name:&str)->Result<(),String>{
     if bytes.len()>128*1024 || bytes.is_empty() {return Err("Invalid settings size".into())}
     let value:Value=serde_json::from_slice(bytes).map_err(|_|"Malformed JSON".to_string())?;
     let valid=if name=="change-aliases.json" {
@@ -194,6 +239,10 @@ fn save_template_json(dest:&Path,bytes:&[u8],name:&str)->Result<(),String>{
         value.get("codes").and_then(Value::as_object).is_some_and(|m|m.len()<=250)
     };
     if !valid{return Err("Invalid JSON settings schema".into())}
+    Ok(())
+}
+fn save_template_json(dest:&Path,bytes:&[u8],name:&str)->Result<(),String>{
+    validate_template_json(bytes,name)?;
     if let Some(parent)=dest.parent(){fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
     let next=dest.with_extension("tmp");
     fs::write(&next,bytes).map_err(|e|e.to_string())?;
@@ -280,10 +329,6 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
         }
         // Never block initial HTML/JS rendering while the Cloudflare alias service
         // authenticates. The next GET uses the freshly cached file on disk.
-        if name=="change-aliases.json"{
-            let state_for_refresh=state.clone();
-            thread::spawn(move ||fetch_cloud_alias(&state_for_refresh));
-        }
         let fallback=www_dir().join(concat!("vue-v",env!("CARGO_PKG_VERSION"))).join("data").join(name);
         let raw=fs::read(file).or_else(|_|fs::read(fallback)).unwrap_or_else(|_|b"{}".to_vec());
         reply(&mut stream,"200 OK","application/json; charset=utf-8",if method=="HEAD"{&[]}else{&raw},"no-store");
@@ -371,7 +416,9 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
                 "ok":true,"version":env!("CARGO_PKG_VERSION"),"mode":mode,"sampled_at":v.get("sampled_at"),"machine_count":v["machines"].as_array().map(|a|a.len()).unwrap_or(0),
                 "server":"127.0.0.1:8787",
                 "sync_status":state.sync_status.lock().map(|s|s.clone()).unwrap_or("UNKNOWN".into()),
-                "last_sync_at":state.last_sync_at.lock().ok().and_then(|v|v.clone())
+                "last_sync_at":state.last_sync_at.lock().ok().and_then(|v|v.clone()),
+                "alias_sync_status":state.alias_sync_status.lock().map(|s|s.clone()).unwrap_or("UNKNOWN".into()),
+                "alias_last_sync_at":state.alias_last_sync_at.lock().ok().and_then(|v|v.clone())
             })).unwrap_or_default(),"no-store")
         }
         _=>("404 Not Found","text/plain",b"Not Found".to_vec(),"no-store")
