@@ -27,15 +27,21 @@ const start=common.indexOf('export async function loadData() {');
 const end=common.indexOf('export async function loadFromFile(file)',start);
 if(start<0||end<0)throw Error('Original common.js loader not found');
 const localLoader=`export async function loadData() {
-  const [machinesResponse, scheduleResponse] = await Promise.all([
+  // Each endpoint reads EXE_FOLDER/data/*.json through mics-only.exe.
+  // Missing schedules must never blank the machine dashboard.
+  const [machineResult, scheduleResult] = await Promise.allSettled([
     fetch('/api/machines', {cache: 'no-store'}),
     fetch('/api/schedule', {cache: 'no-store'}),
   ]);
-  if(!machinesResponse.ok || !scheduleResponse.ok) {
-    throw new Error('MICS-only local API unavailable: ' + machinesResponse.status + '/' + scheduleResponse.status);
+  if(machineResult.status !== 'fulfilled' || !machineResult.value.ok) {
+    throw new Error('Local machine JSON not available');
   }
-  const machinesData = await machinesResponse.json();
-  const scheduleData = await scheduleResponse.json();
+  const machinesData = await machineResult.value.json();
+  let scheduleData = {rows:[]};
+  if(scheduleResult.status === 'fulfilled' && scheduleResult.value.ok) {
+    try { scheduleData = await scheduleResult.value.json(); }
+    catch(error) { console.warn('Invalid local schedule JSON',error); }
+  }
   const machines = Array.isArray(machinesData.machines) ? machinesData.machines.map(m => ({
     ...m,
     qty_ng_total: m.qty_ng,
