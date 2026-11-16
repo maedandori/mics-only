@@ -187,3 +187,8 @@ EXE. Upgrading from a version prior to v0.2.22 still uses its old updater,
 which can roll back. To switch to no-rollback behavior reliably, install the
 v0.2.22 portable EXEs manually once, retaining existing `mics.ini` and
 `data/` files. Subsequent updates use the new no-rollback installer.
+
+
+### v0.2.24 — Direct local JSON and faster first dashboard render
+
+The original ZIP template uses `/data/machines.json` and `/data/schedule-local.json` served from the executable's `data/` directory over localhost. These read-only routes never contact Firebird, D1 or Turso. Machine cards are displayed before the schedule file finishes loading; the schedule page waits for schedules. Identical JSON snapshots reuse their normalized result instead of repeating large schedule transformations. The agent still collects and writes Firebird data in the background, and `/?legacy=1` remains the fallback. Existing local JSON files and settings are preserved.

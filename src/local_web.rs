@@ -338,6 +338,33 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     if method=="PUT"{
         reply(&mut stream,"405 Method Not Allowed","text/plain",b"PUT only for JSON settings","no-store");return
     }
+    // Serve the two on-disk JSON snapshots directly over loopback.
+    // This does not query Firebird, Turso or D1 and never exposes arbitrary paths.
+    // Keep the last good in-memory copy if an atomic rename briefly hides machines.json.
+    if route=="/data/machines.json" {
+        let valid=|bytes:&[u8]|->bool {
+            serde_json::from_slice::<Value>(bytes).ok()
+                .and_then(|v|v.get("machines").and_then(Value::as_array).cloned())
+                .is_some_and(|rows|!rows.is_empty())
+        };
+        let raw=fs::read(&state.data_path).ok().filter(|v|valid(v))
+            .or_else(||fs::read(state.data_path.with_extension("json.bak")).ok().filter(|v|valid(v)))
+            .unwrap_or_else(||serde_json::to_vec(&state.snapshot.lock()
+                .map(|v|v.clone()).unwrap_or_else(|_|json!({"machines":[]}))).unwrap_or_default());
+        reply(&mut stream,"200 OK","application/json; charset=utf-8",
+            if method=="HEAD"{&[]}else{&raw},"no-store");
+        return
+    }
+    if route=="/data/schedule-local.json" {
+        let path=state.data_path.with_file_name("schedule-local.json");
+        let raw=fs::read(path).ok().filter(|bytes|{
+            serde_json::from_slice::<Value>(bytes).ok()
+                .and_then(|v|v.get("rows").and_then(Value::as_array).cloned()).is_some()
+        }).unwrap_or_else(||b"{\"rows\":[],\"from\":null,\"to\":null}".to_vec());
+        reply(&mut stream,"200 OK","application/json; charset=utf-8",
+            if method=="HEAD"{&[]}else{&raw},"no-store");
+        return
+    }
     // Versioned Vue bundle. The v0.2.5 updater preserves existing www files:
     // a new versioned directory is copied without replacing the legacy UI.
     let route=path.split('?').next().unwrap_or("");

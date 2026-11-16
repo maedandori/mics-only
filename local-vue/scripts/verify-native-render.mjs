@@ -24,4 +24,9 @@ for(const page of ['index.html','change-schedule.html','status-colors.html','cha
  const html=readFileSync(resolve(web,page),'utf8');
  assert.match(html, /css\/tailwind-generated\.css/, 'Original template stylesheet reference missing: '+page);
 }
-console.log('PASS machine/schedule branches, native JS assets, and current-version layout CSS');
+const loader = readFileSync(resolve(web,'js/common.js'),'utf8');
+assert.match(loader,/fetch\('\/data\/machines\.json'/,'Browser must read the local machine JSON directly');
+assert.match(loader,/fetch\('\/data\/schedule-local\.json'/,'Browser must read the local schedule JSON directly');
+assert.ok(!loader.includes("fetch('/api/machines'")&&!loader.includes("fetch('/api/schedule'"),'Database-like API polling must not reappear');
+assert.match(loader,/lastNormalized/,'Unchanged JSON should reuse normalized state');
+console.log('PASS original nodes, local JSON-only loader, schedule deferral, CSS');

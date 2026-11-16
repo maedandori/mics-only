@@ -26,42 +26,83 @@ let common=readFileSync(commonPath,'utf8');
 const start=common.indexOf('export async function loadData() {');
 const end=common.indexOf('export async function loadFromFile(file)',start);
 if(start<0||end<0)throw Error('Original common.js loader not found');
-const localLoader=`export async function loadData() {
-  // Each endpoint reads EXE_FOLDER/data/*.json through mics-only.exe.
-  // Missing schedules must never blank the machine dashboard.
-  const [machineResult, scheduleResult] = await Promise.allSettled([
-    fetch('/api/machines', {cache: 'no-store'}),
-    fetch('/api/schedule', {cache: 'no-store'}),
-  ]);
-  if(machineResult.status !== 'fulfilled' || !machineResult.value.ok) {
-    throw new Error('Local machine JSON not available');
+const localLoader=`// Fast local JSON loader. Browser never requests a production database.
+let lastMachineText = null, lastMachineData = null;
+let lastScheduleText = null, lastScheduleData = {rows:[]};
+let lastNormalized = null, normalizedMachineText = null, normalizedScheduleText = null;
+let schedulePromise = null, scheduleRequestedAt = 0;
+async function refreshLocalSchedule() {
+  if (schedulePromise) return schedulePromise;
+  if (Date.now() - scheduleRequestedAt < 5000) return;
+  scheduleRequestedAt = Date.now();
+  schedulePromise = (async () => {
+    const response = await fetch('/data/schedule-local.json', {cache: 'no-store'});
+    if (!response.ok) throw new Error('Local schedule JSON HTTP ' + response.status);
+    const text = await response.text();
+    if (text === lastScheduleText) return;
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed.rows)) throw new Error('Invalid local schedule JSON rows');
+    lastScheduleText = text;
+    lastScheduleData = parsed;
+    lastNormalized = null;
+  })().catch(error => console.warn('Local schedule cache retained:', error))
+    .finally(() => {schedulePromise = null;});
+  return schedulePromise;
+}
+export async function loadData() {
+  // Render machine nodes as soon as the small local JSON arrives.
+  // Do not wait for the potentially large schedule file on Dashboard.
+  try {
+    const response = await fetch('/data/machines.json', {cache: 'no-store'});
+    if (!response.ok) throw new Error('Local machines JSON HTTP ' + response.status);
+    const text = await response.text();
+    if (text !== lastMachineText) {
+      const parsed = JSON.parse(text);
+      if (!Array.isArray(parsed.machines) || !parsed.machines.length)
+        throw new Error('Local machines JSON is empty');
+      lastMachineText = text;
+      lastMachineData = parsed;
+      lastNormalized = null;
+    }
+  } catch(error) {
+    console.warn('Local machines JSON unavailable, preserving last snapshot:', error);
+    if (!lastMachineData) {
+      // Show machine placeholders rather than removing every node on initial failure.
+      lastMachineData = {machines:[15,8,19,14,5,17,13,6,10,11,18,7,12,16]
+        .map(machine_no => ({machine_no, status_name:'データなし'}))};
+      lastMachineText = '__placeholder__';
+    }
   }
-  const machinesData = await machineResult.value.json();
-  let scheduleData = {rows:[]};
-  if(scheduleResult.status === 'fulfilled' && scheduleResult.value.ok) {
-    try { scheduleData = await scheduleResult.value.json(); }
-    catch(error) { console.warn('Invalid local schedule JSON',error); }
-  }
-  const machines = Array.isArray(machinesData.machines) ? machinesData.machines.map(m => ({
+  const loadingSchedule = refreshLocalSchedule();
+  // The schedule page needs complete rows before its first render.
+  if (location.pathname.endsWith('/change-schedule.html')) await loadingSchedule;
+  // If both JSON files are unchanged, reuse the exact result object and skip
+  // expensive normalization and unnecessary native-DOM redraws.
+  if (lastNormalized && normalizedMachineText === lastMachineText &&
+      normalizedScheduleText === lastScheduleText) return lastNormalized;
+  const machines = lastMachineData.machines.map(m => ({
     ...m,
     qty_ng_total: m.qty_ng,
     qty_ng: m.qty_ng_shift_status === 'mics_today' && Number.isFinite(Number(m.qty_ng_shift))
       ? Number(m.qty_ng_shift) : m.qty_ng,
-  })) : [];
+  }));
   const byMachine = new Map();
-  for(const row of (scheduleData.rows || [])){
+  for (const row of lastScheduleData.rows) {
     const key = Number(row.machine_no);
-    if(!byMachine.has(key))byMachine.set(key,[]);
+    if (!byMachine.has(key)) byMachine.set(key, []);
     byMachine.get(key).push(row);
   }
-  const windows = [...byMachine].map(([machine_no,rows])=>({
+  const windows = [...byMachine].map(([machine_no, rows]) => ({
     machine_no, rows_json: JSON.stringify(rows),
-    window_start: scheduleData.from || null,
-    window_end: scheduleData.to || null,
-    updated_at: scheduleData.sampled_at || null,
+    window_start: lastScheduleData.from || null,
+    window_end: lastScheduleData.to || null,
+    updated_at: lastScheduleData.sampled_at || null,
   }));
-  return {...normalizeData(machines,windows),source:'MICS-only local JSON',
+  lastNormalized = {...normalizeData(machines, windows), source:'MICS-only direct local JSON',
     loadedAt:new Date().toISOString(),live:true};
+  normalizedMachineText = lastMachineText;
+  normalizedScheduleText = lastScheduleText;
+  return lastNormalized;
 }
 
 `;
