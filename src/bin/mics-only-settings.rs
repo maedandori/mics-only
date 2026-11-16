@@ -233,7 +233,9 @@ fn main() {
                         match result {
                             Ok(summary)=>{
                                 if summary.starts_with("UPDATE_STAGED ") {
-                                    nwg::simple_message("GitHub Update",&format!("{summary}\nThe installer continues after Settings closes. Check data\\update.log for installation result."));
+                                    // Exit immediately without a blocking modal dialog so
+                                    // apply-update.ps1 can overwrite mics-only-settings.exe.
+                                    update_text_ui.set_text(&summary);
                                     nwg::stop_thread_dispatch();
                                 }else{nwg::simple_message("GitHub Update",&summary);}
                             },
@@ -296,7 +298,7 @@ fn main() {
                 update_text_ui.set_text("Update: 1% - Starting GitHub check");
                 let tx=update_sender.as_ref().clone();
                 let sender=update_notice_sender.clone();
-                let exe=agent_exe.clone();
+                let exe=std::env::current_exe().unwrap_or_else(|_|agent_exe.clone());
                 thread::spawn(move || {
                     let outcome=updater::install_with_progress(&exe,|pct,msg|{
                         let _=tx.send((pct,msg.to_string(),None));

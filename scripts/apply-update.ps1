@@ -39,8 +39,11 @@ try {
   }
   Log 'UPDATE_PREFLIGHT_OK All binaries and web entry files present'
   if($ParentId -gt 0){
-    try{Wait-Process -Id $ParentId -Timeout 75 -ErrorAction Stop}catch{
-      if(Get-Process -Id $ParentId -ErrorAction SilentlyContinue){throw 'Parent did not exit'}
+    try{Wait-Process -Id $ParentId -Timeout 15 -ErrorAction Stop}catch{
+      if(Get-Process -Id $ParentId -ErrorAction SilentlyContinue){
+        Stop-Process -Id $ParentId -Force -ErrorAction SilentlyContinue
+        try{Wait-Process -Id $ParentId -Timeout 10 -ErrorAction SilentlyContinue}catch{}
+      }
     }
   }
   # Do not terminate an ACTIVE agent, and never stop another print process.
@@ -48,8 +51,11 @@ try {
   try{$status=Invoke-RestMethod -Uri 'http://127.0.0.1:8787/api/status' -TimeoutSec 3}catch{}
   if($status -and $status.mode -eq 'ACTIVE'){throw 'ACTIVE agent, update postponed'}
   if($ParentId -eq 0 -and (!$status -or !$status.ok)){throw 'Agent status unavailable, update postponed'}
-  # Settings invocation may leave agent running. Stop only mics-only by name.
-  Log 'UPDATE_STAGE 35 Stopping standby agent'
+  # Stop both mics-only and any open mics-only-settings window so neither EXE is locked.
+  Log 'UPDATE_STAGE 35 Stopping standby agent and settings UI'
+  $oldSettings=@(Get-Process -Name 'mics-only-settings' -ErrorAction SilentlyContinue)
+  foreach($s in $oldSettings){Stop-Process -Id $s.Id -Force -ErrorAction SilentlyContinue}
+  foreach($s in $oldSettings){try{Wait-Process -Id $s.Id -Timeout 10 -ErrorAction SilentlyContinue}catch{}}
   $oldAgents=@(Get-Process -Name 'mics-only' -ErrorAction SilentlyContinue)
   foreach($oldAgent in $oldAgents){Stop-Process -Id $oldAgent.Id -Force -ErrorAction Stop}
   foreach($oldAgent in $oldAgents){
@@ -71,7 +77,22 @@ try {
   }
   Log 'UPDATE_STAGE 45 Both executables backed up'
   $replacementStarted=$true
-  foreach($name in $names){Copy-Item -LiteralPath (Join-Path $stage $name) -Destination (Join-Path $Target $name) -Force}
+  foreach($name in $names){
+    $copied=$false
+    $lastErr=$null
+    for($attempt=1;$attempt -le 10;$attempt++){
+      try{
+        Copy-Item -LiteralPath (Join-Path $stage $name) -Destination (Join-Path $Target $name) -Force -ErrorAction Stop
+        $copied=$true
+        break
+      }catch{
+        $lastErr=$_
+        Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($name)) -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
+      }
+    }
+    if(!$copied){throw "Cannot replace ${name}: $($lastErr.Exception.Message)"}
+  }
   $replacementCompleted=$true
   Log 'UPDATE_STAGE 60 New executables installed'
   # Install the versioned Vue files alongside legacy WWW. Existing configurations

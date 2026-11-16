@@ -52,9 +52,16 @@ pub fn install_with_progress(exe:&Path,mut progress:impl FnMut(u32,&str))->Resul
  };
  progress(10,"Release found; preparing download");
  let folder=exe.parent().ok_or("Cannot find installation directory")?;
+ let is_background_agent=std::env::current_exe().ok()
+  .and_then(|p|p.file_name().and_then(|n|n.to_str()).map(|s|s.eq_ignore_ascii_case("mics-only.exe")))
+  .unwrap_or(false);
  let blocked=folder.join("data").join("update-blocked-version.txt");
- if fs::read_to_string(blocked).ok().is_some_and(|v|v.trim()==tag){
-  return Err(format!("Release {tag} previously failed; waiting for a newer release"))
+ if is_background_agent {
+  if fs::read_to_string(&blocked).ok().is_some_and(|v|v.trim()==tag){
+   return Err(format!("Release {tag} previously failed; waiting for a newer release"))
+  }
+ } else {
+  let _=fs::remove_file(&blocked);
  }
  let dir=folder.join("data").join("update-staging");
  fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
@@ -77,6 +84,7 @@ pub fn install_with_progress(exe:&Path,mut progress:impl FnMut(u32,&str))->Resul
   if percent>last_percent { last_percent=percent; progress(percent,"Downloading release ZIP"); }
  }
  dst.flush().map_err(|e|e.to_string())?;
+ drop(dst);
  progress(87,"Checking download size and SHA256");
  if total!=size{return Err("Release ZIP size mismatch".into())}
  if let Some(expected)=digest{
@@ -87,10 +95,11 @@ pub fn install_with_progress(exe:&Path,mut progress:impl FnMut(u32,&str))->Resul
  progress(94,"Download verified; preparing installer without automatic rollback");
  let script=dir.join("apply-update.ps1");
  fs::write(&script,include_str!("../scripts/apply-update.ps1")).map_err(|e|e.to_string())?;
+ let parent_id=if is_background_agent {0} else {std::process::id()};
  Command::new("powershell.exe")
   .args(["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File"])
   .arg(&script).arg("-Archive").arg(&zip).arg("-Target").arg(folder)
-  .arg("-ParentId").arg(if exe.file_name().and_then(|n|n.to_str())==Some("mics-only.exe"){0}else{std::process::id()}.to_string())
+  .arg("-ParentId").arg(parent_id.to_string())
   .arg("-Version").arg(&tag)
   .creation_flags(CREATE_NO_WINDOW).spawn()
   .map_err(|e|format!("Cannot start update helper: {e}"))?;

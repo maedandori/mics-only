@@ -204,7 +204,12 @@ On each new page load the original template opens in grid mode, ignoring an old 
 The framework-free renderer now memoizes template computed expressions during each render, avoiding repeated calculations for every field of each machine card. The Dashboard reads machine JSON immediately; the larger local schedule is processed after the first paint and cached until it changes. Status/alias configuration refreshes in parallel instead of blocking node display. Unchanged machine JSON and settings do not trigger a full redraw. Schedule changes still update forecast displays, and the original 4-page template, data files, and no-rollback installer remain unchanged.
 
 
-### v0.2.27 — Concurrent loopback server, cached DOM templates & instant page loads
+### v0.2.28 — Fix Settings & auto-update executable lock and ParentId detection
+
+- Fixed `mics-only-settings.exe` passing `mics-only.exe` instead of `current_exe()` to `updater::install_with_progress`, which previously caused `-ParentId 0` to be passed on manual Settings updates.
+- Settings now exits immediately after staging an update without holding a modal MessageBox lock on `mics-only-settings.exe`.
+- Manual updates from Settings clear any stale `data/update-blocked-version.txt`, and `dst` is closed before `Expand-Archive` is spawned.
+- `apply-update.ps1` now stops any open `mics-only-settings` process and retries executable replacement up to 10 times if Windows briefly holds a file handle.
 
 - The loopback HTTP server (`127.0.0.1:8787`) now serves concurrent connections with `TCP_NODELAY` and a 400ms read timeout so browser preconnect sockets never stall HTML/CSS/JS/JSON requests.
 - Validated `data/machines.json` and `data/schedule-local.json` payloads are cached in memory by file modification timestamp, avoiding repeated disk reads and JSON parsing on unchanged snapshots.
