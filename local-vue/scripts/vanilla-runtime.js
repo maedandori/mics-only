@@ -78,7 +78,7 @@ function render(node,ctx,app,path,slot){
  }
  const el=document.createElement(tag);
  for(const a of node.attributes){const name=a.name,val=a.value;
-  if(name==='ref'){const item=evaluate(val,ctx);if(item?.[REF])item.value=el;continue}
+  if(name==='ref'){let obj=ctx;let item;while(obj&&!item){item=Object.getOwnPropertyDescriptor(obj,val)?.value;obj=Object.getPrototypeOf(obj)}if(item?.[REF])item.value=el;continue}
   if(name==='v-model'){
    let value=evaluate(val,ctx);if(el.type==='checkbox')el.checked=!!value;else el.value=value??'';
    el.addEventListener(el.tagName==='SELECT'||el.type==='checkbox'?'change':'input',()=>{assign(val,ctx,el.type==='checkbox'?el.checked:el.value);later(app)});
@@ -98,7 +98,9 @@ function render(node,ctx,app,path,slot){
    if(value!==false&&value!=null)el.setAttribute(key,String(value));continue}
   if(name.startsWith('v-')||name.startsWith('#'))continue;el.setAttribute(name,val);
  }
- el.appendChild(children(node.childNodes,ctx,app,path,slot));return el;
+ el.appendChild(children(node.childNodes,ctx,app,path,slot));
+ if(el.tagName==='SELECT'&&node.hasAttribute('v-model'))el.value=evaluate(node.getAttribute('v-model'),ctx)??'';
+ return el;
 }
 export function createApp(component){
  const app={components:{},instances:new Map(),mounted:[],cleanup:[],render:()=>{}};
