@@ -85,8 +85,8 @@ jobs:
               }catch{}
             }
             if(!$healthy){throw 'New Windows build failed API boot smoke test'}
-            $home=Invoke-WebRequest 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 5
-            if($home.StatusCode -ne 200 -or $home.Content -notlike '*vue-v0.2.20/*'){throw 'Original template not active'}
+            $dashboardResponse=Invoke-WebRequest 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 5
+            if($dashboardResponse.StatusCode -ne 200 -or $dashboardResponse.Content -notlike '*vue-v0.2.20/*'){throw 'Original template not active'}
             $legacy=Invoke-WebRequest 'http://127.0.0.1:8787/?legacy=1' -UseBasicParsing -TimeoutSec 5
             if($legacy.Content -notlike '*id="machines"*'){throw 'Legacy fallback missing'}
             $index=Get-Content (Join-Path $folder 'www/vue-v0.2.20/index.html') -Raw
