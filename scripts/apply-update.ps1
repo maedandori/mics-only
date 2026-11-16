@@ -13,22 +13,8 @@ function Log([string]$message){
   New-Item -ItemType Directory -Path (Split-Path $log) -Force | Out-Null
   Add-Content -LiteralPath $log -Value ("$(Get-Date -Format o) "+$message)
 }
-function Restore {
-  Log 'ROLLBACK_BEGIN'
-  $webBackup=Join-Path $backup 'www'
-  if(Test-Path -LiteralPath $webBackup){
-    foreach($file in (Get-ChildItem -LiteralPath $webBackup -File)){
-      Copy-Item -LiteralPath $file.FullName -Destination (Join-Path (Join-Path $Target 'www') $file.Name) -Force
-    }
-  }
-  foreach($name in $names){
-    $old=Join-Path $backup $name
-    $dest=Join-Path $Target $name
-    if(Test-Path -LiteralPath $old){Copy-Item -LiteralPath $old -Destination $dest -Force}
-  }
-  Log 'ROLLBACK_RESTORED'
-}
 $replacementStarted=$false
+$replacementCompleted=$false
 try {
   if($Version -notmatch '^v\d+\.\d+\.\d+$'){throw 'Invalid version'}
   if(!(Test-Path -LiteralPath $Archive)){throw 'Release ZIP missing'}
@@ -86,6 +72,7 @@ try {
   Log 'UPDATE_STAGE 45 Both executables backed up'
   $replacementStarted=$true
   foreach($name in $names){Copy-Item -LiteralPath (Join-Path $stage $name) -Destination (Join-Path $Target $name) -Force}
+  $replacementCompleted=$true
   Log 'UPDATE_STAGE 60 New executables installed'
   # Install the versioned Vue files alongside legacy WWW. Existing configurations
   # and custom legacy files are never overwritten.
@@ -111,8 +98,8 @@ try {
     $templateWarnings+= $_.Exception.Message
     Log "WEB_WARNING $($_.Exception.Message)"
   }
-  # Legacy HTML/CSS/JS is the default UI. Ship the exact files used by this
-  # release, while retaining a backup for rollback.
+  # Keep existing legacy files as a manual emergency backup only.
+  # No automatic downgrade or rollback is performed.
   foreach($name in @('index.html','app.js','style.css','sw.js','manifest.webmanifest','icon.svg','vue-diagnostics.js')){
     $source=Join-Path (Join-Path $stage 'www') $name
     if(!(Test-Path -LiteralPath $source)){throw "Legacy web file missing: $name"}
@@ -157,21 +144,22 @@ try {
   Log "UPDATE_STAGE 100 Local web verified"
   if($templateWarnings.Count -gt 0){Log "UPDATE_SUCCESS_WITH_WEB_WARNING $Version details=$($templateWarnings -join '; ')"}
   else{Log "UPDATE_SUCCESS $Version"}
-  # Keep backup until next successful update, for emergency manual recovery.
+  # Previous binaries are retained for manual recovery only.
 }catch{
   Log "UPDATE_FAILED $($_.Exception.Message) at $($_.InvocationInfo.ScriptLineNumber)"
   if($_.Exception.Message -notin @('ACTIVE agent, update postponed','Agent status unavailable, update postponed')){
     New-Item -ItemType Directory -Path (Join-Path $Target 'data') -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $Target 'data\update-blocked-version.txt') -Value $Version
   }
+  # Never copy old binaries back or delete newly installed web resources.
   if($replacementStarted){
-    if($vueDest -and (Test-Path -LiteralPath $vueDest)){Remove-Item -LiteralPath $vueDest -Recurse -Force -ErrorAction SilentlyContinue}
-    Get-Process -Name 'mics-only' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 500
-    try{
-      Restore
-      Start-Process -FilePath (Join-Path $Target 'mics-only.exe') -WorkingDirectory $Target | Out-Null
-      Log 'ROLLBACK_RESTARTED'
-    }catch{Log "ROLLBACK_FAILED $($_.Exception.Message)"}
+    Log "UPDATE_FAILED_NO_ROLLBACK version=$Version replaced=$replacementCompleted"
+    # Start new EXE only if no agent remains. Do not terminate a healthy agent.
+    if(!(Get-Process -Name 'mics-only' -ErrorAction SilentlyContinue)){
+      try{
+        Start-Process -FilePath (Join-Path $Target 'mics-only.exe') -WorkingDirectory $Target | Out-Null
+        Log 'UPDATE_RESTART_ATTEMPTED'
+      }catch{Log "UPDATE_RESTART_FAILED $($_.Exception.Message)"}
+    }
   }
 }finally{Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue}
