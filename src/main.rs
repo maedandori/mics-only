@@ -246,6 +246,9 @@ fn run(c: Config) -> Result<(), String> {
     let alias_token=env::var("MICS_COORDINATOR_TOKEN").unwrap_or_default();
     local.set_alias_sync(&c.coordinator_url,&alias_token);
     local_web::start(local.clone())?;
+    // Fetch alias from D1 in the agent, not from the browser. Works in standby,
+    // active and mirror-only modes and never blocks the web UI.
+    local_web::start_alias_sync(local.clone());
     // Check GitHub every six hours; postpone while ACTIVE (Firebird lease holder).
     // Update applies only to this standby agent; the independent print agent is untouched.
     #[cfg(windows)]
