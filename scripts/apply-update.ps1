@@ -37,7 +37,21 @@ try {
   Log 'UPDATE_STAGE 10 Extracting archive'
   Expand-Archive -LiteralPath $Archive -DestinationPath $stage -Force
   Log 'UPDATE_STAGE 25 Archive extracted'
-  foreach($name in $names){if(!(Test-Path -LiteralPath (Join-Path $stage $name))){throw "Missing $name"}}
+  foreach($name in $names){
+    $binary=Join-Path $stage $name
+    if(!(Test-Path -LiteralPath $binary)){throw "Missing $name"}
+    if((Get-Item -LiteralPath $binary).Length -lt 100KB){throw "Suspiciously small executable: $name"}
+  }
+  # Validate all mandatory release files before touching a working installation.
+  $vueName='vue-'+$Version
+  $vueSrc=Join-Path (Join-Path $stage 'www') $vueName
+  if(!(Test-Path -LiteralPath (Join-Path $vueSrc 'index.html'))){throw 'Template index missing in ZIP'}
+  foreach($name in @('index.html','app.js','style.css','sw.js','manifest.webmanifest','icon.svg','vue-diagnostics.js')){
+    if(!(Test-Path -LiteralPath (Join-Path (Join-Path $stage 'www') $name))){
+      throw "Static web file missing in ZIP: $name"
+    }
+  }
+  Log 'UPDATE_PREFLIGHT_OK All binaries and web entry files present'
   if($ParentId -gt 0){
     try{Wait-Process -Id $ParentId -Timeout 75 -ErrorAction Stop}catch{
       if(Get-Process -Id $ParentId -ErrorAction SilentlyContinue){throw 'Parent did not exit'}
@@ -50,8 +64,16 @@ try {
   if($ParentId -eq 0 -and (!$status -or !$status.ok)){throw 'Agent status unavailable, update postponed'}
   # Settings invocation may leave agent running. Stop only mics-only by name.
   Log 'UPDATE_STAGE 35 Stopping standby agent'
-  Get-Process -Name 'mics-only' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction Stop
-  Start-Sleep -Milliseconds 700
+  $oldAgents=@(Get-Process -Name 'mics-only' -ErrorAction SilentlyContinue)
+  foreach($oldAgent in $oldAgents){Stop-Process -Id $oldAgent.Id -Force -ErrorAction Stop}
+  foreach($oldAgent in $oldAgents){
+    try{Wait-Process -Id $oldAgent.Id -Timeout 20 -ErrorAction Stop}catch{
+      if(Get-Process -Id $oldAgent.Id -ErrorAction SilentlyContinue){throw "Old agent PID $($oldAgent.Id) still running"}
+    }
+  }
+  # Confirm that no old agent remains before replacing files.
+  if(Get-Process -Name 'mics-only' -ErrorAction SilentlyContinue){throw 'Agent still running after stop'}
+  Log 'UPDATE_STAGE 38 Old agent fully exited'
   New-Item -ItemType Directory -Path $backup -Force | Out-Null
   # Never restore stale web files from an earlier update attempt.
   $webBackup=Join-Path $backup 'www'
@@ -67,8 +89,6 @@ try {
   Log 'UPDATE_STAGE 60 New executables installed'
   # Install the versioned Vue files alongside legacy WWW. Existing configurations
   # and custom legacy files are never overwritten.
-  $vueName='vue-'+$Version
-  $vueSrc=Join-Path (Join-Path $stage 'www') $vueName
   $vueDest=Join-Path (Join-Path $Target 'www') $vueName
   if(!(Test-Path -LiteralPath (Join-Path $vueSrc 'index.html'))){throw 'Vue index.html missing from release'}
   if(Test-Path -LiteralPath $vueDest){Remove-Item -LiteralPath $vueDest -Recurse -Force}
@@ -105,7 +125,7 @@ try {
   Log 'UPDATE_STAGE 75 Legacy HTML and Vue resources verified'
   $process=Start-Process -FilePath (Join-Path $Target 'mics-only.exe') -WorkingDirectory $Target -PassThru
   $healthy=$false
-  for($i=0;$i -lt 25;$i++){
+  for($i=0;$i -lt 40;$i++){
     Start-Sleep -Seconds 2
     if($process.HasExited){break}
     try{
@@ -113,7 +133,10 @@ try {
       if($health.ok -eq $true -and $health.version -eq $Version.TrimStart('v')){$healthy=$true;break}
     }catch{}
   }
-  if(!$healthy){throw 'New agent health/version check failed'}
+  if(!$healthy){
+    $detail=if($process.HasExited){"agent exited code=$($process.ExitCode)"}else{"agent stayed alive but /api/status not healthy"}
+    throw "New agent health/version check failed: $detail"
+  }
   Log 'UPDATE_STAGE 90 Agent API health verified'
   # Web problems should not rollback a working agent. Probe the actual HTML
   # and assets, retain the EXE, and make any UI failure visible in update.log.
@@ -136,7 +159,7 @@ try {
   else{Log "UPDATE_SUCCESS $Version"}
   # Keep backup until next successful update, for emergency manual recovery.
 }catch{
-  Log "UPDATE_FAILED $($_.Exception.Message)"
+  Log "UPDATE_FAILED $($_.Exception.Message) at $($_.InvocationInfo.ScriptLineNumber)"
   if($_.Exception.Message -notin @('ACTIVE agent, update postponed','Agent status unavailable, update postponed')){
     New-Item -ItemType Directory -Path (Join-Path $Target 'data') -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $Target 'data\update-blocked-version.txt') -Value $Version
