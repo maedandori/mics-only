@@ -44,4 +44,10 @@ assert.match(loader,/__micsCachedData/,'Session snapshot cache must hydrate init
 assert.match(dashboard,/configLoading/,'Settings must not block first machine render');
 assert.match(dashboard,/if \(data !== state\.data\)/,'Unchanged machine data must avoid full node redraw');
 assert.match(dashboard,/mics-local-schedule-ready/,'Schedule updates must refresh forecasts');
+const tabsJs=readFileSync(resolve(web,'js/local-horizontal-tabs.js'),'utf8');
+const tabsCss=readFileSync(resolve(web,'css/local-horizontal-tabs.css'),'utf8');
+assert.match(tabsJs,/\$\('#app #view-seg'\)/,'Horizontal tabs must relocate #view-seg into top bar');
+assert.match(tabsJs,/dest\.replaceChildren\(group\)/,'Relocated #view-seg must replace stale controls on rerender');
+assert.match(tabsCss,/#mics-local-tabs>\[data-page\]/,'Tab button styles must not override #view-seg segmented buttons');
+assert.match(tabsCss,/#app #status-chips,#app #search,#app #sort/,'Old dashboard filter toolbar must be hidden');
 console.log('PASS original nodes, cached computations, first-paint JSON loading, diagnostics and CSS');

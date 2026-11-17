@@ -70,8 +70,132 @@ execFileSync(process.execPath,[tailwind,'-c','tailwind.config.cjs','-i','origina
 const generatedCss=readFileSync(join(output,'css','tailwind-generated.css'),'utf8');
 if(generatedCss.length<4000||!generatedCss.includes('.grid'))throw Error('Current-version Tailwind CSS missing or incomplete: '+base);
 // Add local-only horizontal navigation without rewriting the user's original template.
-const localTabsJS="/* MICS local horizontal navigation and all-machine order list. Read-only JSON. */\n(()=>{\n'use strict';\nconst $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>Array.from(r.querySelectorAll(s));\nconst esc=s=>String(s??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\nconst order=[15,8,19,14,5,17,13,6,10,11,18,7,12,16], byOrder=n=>{const i=order.indexOf(Number(n));return i<0?999:i};\nconst dashboard=location.pathname==='/'||location.pathname.endsWith('/index.html');\nfunction titleText(node){return (node?.textContent||'').replace(/\\s+/g,' ').trim()}\nfunction removeOldChrome(){\n  // Locate the original three-mode controller and relocate it intact to the\n  // top-right of the horizontal tab bar. Never duplicate the controls.\n  const originalButtons=$$('button').filter(b=>!b.closest('#mics-local-tabs') && !b.closest('#mics-products'));\n  const mode=label=>originalButtons.find(b=>titleText(b).replace(/\\s+/g,'')===label);\n  const buttons=['カード','一覧','日程'].map(mode);\n  if(buttons.every(Boolean)){\n    let group=buttons[0].parentElement;\n    for(let i=0;group&&i<7&&!buttons.every(b=>group.contains(b));i++)group=group.parentElement;\n    if(group && group!==document.body){\n      // Identify the old full-width toolbar BEFORE moving its view buttons.\n      let toolbar=group;\n      for(let i=0;toolbar&&i<6;i++,toolbar=toolbar.parentElement){\n        if(toolbar===document.body || toolbar.id==='mics-local-tabs')break;\n        const txt=titleText(toolbar);\n        const hasFilter=/段取り中\\s*\\(100\\)|サイクル注意\\s*\\(210\\)|サンプル\\s*\\(600\\)/.test(txt);\n        const hasSearch=!!toolbar.querySelector('input[placeholder*=\"受注番号\"],input[placeholder*=\"品名\"]');\n        if(hasFilter && hasSearch && !toolbar.querySelector('.card[data-machine],article[data-machine]')){\n          toolbar.dataset.micsOldToolbar='1';\n          break;\n        }\n      }\n      let dest=$('#mics-local-view-modes',nav);\n      if(!dest){\n        dest=document.createElement('div');\n        dest.id='mics-local-view-modes';\n        nav.append(dest);\n      }\n      // The three buttons share a compact wrapper in the original template.\n      // If they do not, move only those buttons to avoid moving status filters.\n      if(group.querySelectorAll('button').length<=4 && !group.querySelector('input,select')){\n        if(group.parentElement!==dest)dest.append(group);\n      }else{\n        for(const button of buttons)if(button.parentElement!==dest)dest.append(button);\n      }\n    }\n  }\n  // Hide only the old status/search/menu row.  Never hide the new navigation.\n  // Independently hide deprecated settings links.\n  $$('a,button').forEach(el=>{\n    if(el.closest('#mics-local-tabs'))return;\n    if(/^(Status Setting|Status Settings|Alias Setting|Alias Settings|ステータス設定|エイリアス設定)$/i.test(titleText(el))){\n      el.hidden=true;\n    }\n  });\n}\n\nconst nav=document.createElement('nav');\nnav.id='mics-local-tabs';nav.setAttribute('aria-label','画面切り替え');\nnav.innerHTML='<a data-page=\"dashboard\" href=\"/\">▦ ダッシュボード</a><a data-page=\"schedule\" href=\"/change-schedule.html\">▤ 型替え・色替え予定</a><button type=\"button\" data-page=\"products\">☷ 全機械の品番一覧</button>';\ndocument.body.prepend(nav);\nconst productButton=$('[data-page=\"products\"]',nav);\nif(dashboard){$('[data-page=\"dashboard\"]',nav).classList.add('selected')}\nelse if(location.pathname.includes('change-schedule')){$('[data-page=\"schedule\"]',nav).classList.add('selected')}\nconst page=document.createElement('section');page.id='mics-products';page.hidden=true;\npage.innerHTML='<div class=\"mics-products-head\"><div><h2>全機械の品番一覧</h2><p id=\"mics-products-count\">ローカルJSONを読み込み中</p></div><div class=\"mics-products-actions\"><input id=\"mics-products-search\" placeholder=\"受注番号・品名・金型・号機で検索…\" aria-label=\"品番を検索\"><select id=\"mics-products-sort\" aria-label=\"並び替え\"><option value=\"machine\">号機順</option><option value=\"start\">開始日時順</option><option value=\"order\">受注番号順</option></select></div></div><div class=\"mics-products-scroll\"><table><thead><tr><th>#</th><th>号機</th><th>受注番号</th><th>品名</th><th>金型</th><th>開始</th><th>終了</th><th>時間</th></tr></thead><tbody id=\"mics-products-rows\"></tbody></table></div>';\ndocument.body.append(page);\nlet rows=[], showing=false, loading=false;\nconst machineKey=r=>Number(r.machine_no??r.machine??r.machine_number);\nconst parseDate=v=>{if(!v)return NaN;const s=String(v);return Date.parse(/[zZ]$|[+-]\\d\\d:\\d\\d$/.test(s)?s:s.replace(' ','T')+'+09:00')};\nconst formatDate=v=>{const n=parseDate(v);return Number.isFinite(n)?new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',month:'2-digit',day:'2-digit',weekday:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(n)):String(v||'—')};\nconst duration=r=>{const a=parseDate(r.start_at),b=parseDate(r.end_at);if(!Number.isFinite(a)||!Number.isFinite(b)||b<a)return '—';const mins=Math.round((b-a)/60000);return mins>=1440?Math.floor(mins/1440)+'日'+Math.floor(mins%1440/60)+'時間':Math.floor(mins/60)+'時間'+mins%60+'分'};\nfunction render(){\n const q=$('#mics-products-search',page).value.normalize('NFKC').toLowerCase().trim();\n const sort=$('#mics-products-sort',page).value;\n const selected=rows.filter(r=>!q||[r.machine_no,r.order_no,r.product_name,r.mold_no,r.mold_name,r.color].some(v=>String(v??'').normalize('NFKC').toLowerCase().includes(q)));\n selected.sort((a,b)=>sort==='start'?(parseDate(a.start_at)||0)-(parseDate(b.start_at)||0)||byOrder(machineKey(a))-byOrder(machineKey(b)):sort==='order'?String(a.order_no||'').localeCompare(String(b.order_no||''),'ja'):byOrder(machineKey(a))-byOrder(machineKey(b))||(parseDate(a.start_at)||0)-(parseDate(b.start_at)||0));\n $('#mics-products-count',page).textContent=selected.length+' 件 / 全'+rows.length+' 件 · ローカル保存データ';\n $('#mics-products-rows',page).innerHTML=selected.length?selected.map((r,i)=>'<tr><td>'+ (i+1) +'</td><td><b>'+esc(machineKey(r))+'号機</b></td><td>'+esc(r.order_no||'—')+'</td><td>'+esc(r.product_name||'—')+'</td><td><b>'+esc(r.mold_no||'—')+'</b><small>'+esc(r.mold_name||'')+'</small></td><td>'+esc(formatDate(r.start_at))+'</td><td>'+esc(formatDate(r.end_at))+'</td><td>'+esc(duration(r))+'</td></tr>').join(''):'<tr><td colspan=\"8\" class=\"mics-empty\">該当する品番はありません</td></tr>';\n}\nasync function load(){\n if(loading)return;loading=true;\n try{\n  const [a,b]=await Promise.all([fetch('/data/schedule-local.json',{cache:'no-store'}),fetch('/data/machines.json',{cache:'no-store'})]);\n  if(!a.ok)throw Error('schedule-local.json HTTP '+a.status);\n  const schedule=await a.json(), machines=b.ok?await b.json():{machines:[]};\n  const scheduled=Array.isArray(schedule.rows)?schedule.rows:[];\n  const active=Array.isArray(machines.machines)?machines.machines:[];\n  // Every scheduled order for every machine; include a running machine only if no matching order is scheduled.\n  const known=new Set(scheduled.map(r=>machineKey(r)+'|'+String(r.order_no??'')));\n  rows=scheduled.slice();\n  for(const m of active)if(m.order_no&&!known.has(machineKey(m)+'|'+String(m.order_no)))rows.unshift({...m,start_at:m.start_at||m.started_at||'',end_at:m.end_at||m.scheduled_end_at||''});\n  render();\n }catch(err){$('#mics-products-count',page).textContent='ローカルJSONの読み込みに失敗しました: '+err.message}\n finally{loading=false}\n}\nfunction openProducts(){\n showing=true;page.hidden=false;document.body.classList.add('mics-products-open');\n $$('[data-page]',nav).forEach(el=>el.classList.toggle('selected',el.dataset.page==='products'));\n void load();\n}\nproductButton.addEventListener('click',openProducts);\n$('#mics-products-search',page).addEventListener('input',render);\n$('#mics-products-sort',page).addEventListener('change',render);\nif('EventSource' in window){try{const sse=new EventSource('/api/live');sse.addEventListener('mics-json',e=>{if(!showing)return;try{const kind=JSON.parse(e.data).kind;if(kind==='machines'||kind==='schedule')void load()}catch{}})}catch{}}\ndocument.addEventListener('DOMContentLoaded',removeOldChrome);\nif(document.readyState!=='loading')removeOldChrome();\n// The original runtime mounts its controls asynchronously and may replace them\n// when its view rerenders. Reattach the real buttons only when DOM nodes change.\nlet chromeScheduled=false;\nconst chromeObserver=new MutationObserver(records=>{\n if(!records.some(record=>record.addedNodes.length||record.removedNodes.length))return;\n if(chromeScheduled)return;\n chromeScheduled=true;\n queueMicrotask(()=>{chromeScheduled=false;removeOldChrome()});\n});\nchromeObserver.observe(document.body,{childList:true,subtree:true});\n})();";
-const localTabsCSS="\n/* Compact horizontal menu – the existing upper-right card/list/calendar control is untouched. */\n#mics-local-tabs{position:sticky;top:0;z-index:100;display:flex;flex-wrap:wrap;gap:5px;align-items:center;padding:8px 12px;background:#fff;border-bottom:1px solid #dce3ef;font:600 13px/1.3 system-ui,\"Noto Sans JP\",sans-serif}\n#mics-local-tabs a,#mics-local-tabs button{display:inline-flex;align-items:center;text-decoration:none;color:#31445f;background:transparent;border:1px solid transparent;border-radius:7px;padding:9px 13px;font:inherit;cursor:pointer}\n#mics-local-tabs .selected,#mics-local-tabs a:hover,#mics-local-tabs button:hover{background:#eaf1ff;border-color:#b7cdfb;color:#1451cb}\nbody.mics-products-open> :not(#mics-local-tabs):not(#mics-products):not(script){display:none!important}\n#mics-products{padding:18px 14px 32px;background:#fff;min-height:80vh;color:#12233f;font:13px/1.5 system-ui,\"Noto Sans JP\",sans-serif}\n#mics-products[hidden]{display:none!important}\n.mics-products-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px}\n.mics-products-head h2{font-size:19px;font-weight:800;margin:0}.mics-products-head p{font-size:12px;color:#64748b;margin:2px 0}\n.mics-products-actions{display:flex;gap:8px;flex-wrap:wrap}\n.mics-products-actions input,.mics-products-actions select{border:1px solid #cbd5e1;border-radius:8px;padding:9px 11px;background:#fff;min-width:175px}\n.mics-products-actions input{min-width:min(320px,80vw)}\n.mics-products-scroll{overflow-x:auto;border:1px solid #cbd5e1;border-radius:10px}\n#mics-products table{border-collapse:collapse;width:100%;min-width:880px;text-align:left}\n#mics-products th{background:#eff4fa;font-weight:700;color:#45566e;font-size:12px;padding:10px;border-bottom:1px solid #cbd5e1}\n#mics-products td{padding:9px 10px;border-bottom:1px solid #e0e7f1;vertical-align:top}\n#mics-products tr:nth-child(even){background:#f7f9fc}\n#mics-products tr:hover td{background:#ebf2ff}\n#mics-products td small{display:block;font-size:11px;color:#64748b}\n#mics-products .mics-empty{text-align:center;padding:22px}\n@media(max-width:650px){#mics-local-tabs{padding:5px;gap:1px}#mics-local-tabs a,#mics-local-tabs button{padding:8px;font-size:11px}#mics-products{padding:10px 6px}}\n\n/* Keep all three page tabs and the original card/list/calendar switch in one bar. */\n#mics-local-tabs{display:flex!important;align-items:center!important;flex-wrap:wrap;gap:4px;min-height:48px;width:100%;box-sizing:border-box}\n#mics-local-view-modes{display:flex;align-items:center;justify-content:flex-end;margin-left:auto;flex:0 0 auto}\n#mics-local-view-modes>div{display:flex;align-items:center}\n#mics-local-view-modes button{white-space:nowrap}\n[data-mics-old-toolbar=\"1\"]{display:none!important}\n@media(max-width:750px){#mics-local-tabs{flex-wrap:wrap}#mics-local-view-modes{margin-left:auto}}\n";
+const localTabsJS=`/* MICS local horizontal navigation and all-machine order list. Read-only JSON. */
+(()=>{
+'use strict';
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const order=[15,8,19,14,5,17,13,6,10,11,18,7,12,16], byOrder=n=>{const i=order.indexOf(Number(n));return i<0?999:i};
+const dashboard=location.pathname==='/'||location.pathname.endsWith('/index.html');
+function titleText(node){return (node?.textContent||'').replace(/\\s+/g,' ').trim()}
+const nav=document.createElement('nav');
+nav.id='mics-local-tabs';nav.setAttribute('aria-label','画面切り替え');
+nav.innerHTML='<a data-page="dashboard" href="/">▦ ダッシュボード</a><a data-page="schedule" href="/change-schedule.html">▤ 型替え・色替え予定</a><button type="button" data-page="products">☷ 全機械の品番一覧</button>';
+document.body.prepend(nav);
+const dashboardLink=$('[data-page="dashboard"]',nav);
+const productButton=$('[data-page="products"]',nav);
+if(dashboard){dashboardLink.classList.add('selected')}
+else if(location.pathname.includes('change-schedule')){$('[data-page="schedule"]',nav).classList.add('selected')}
+const page=document.createElement('section');page.id='mics-products';page.hidden=true;
+page.innerHTML='<div class="mics-products-head"><div><h2>全機械の品番一覧</h2><p id="mics-products-count">ローカルJSONを読み込み中</p></div><div class="mics-products-actions"><input id="mics-products-search" placeholder="受注番号・品名・金型・号機で検索…" aria-label="品番を検索"><select id="mics-products-sort" aria-label="並び替え"><option value="machine">号機順</option><option value="start">開始日時順</option><option value="order">受注番号順</option></select></div></div><div class="mics-products-scroll"><table><thead><tr><th>#</th><th>号機</th><th>受注番号</th><th>品名</th><th>金型</th><th>開始</th><th>終了</th><th>時間</th></tr></thead><tbody id="mics-products-rows"></tbody></table></div>';
+document.body.append(page);
+let rows=[], showing=false, loading=false;
+function closeProducts(){
+ if(!showing)return;
+ showing=false;page.hidden=true;document.body.classList.remove('mics-products-open');
+ $$('[data-page]',nav).forEach(el=>el.classList.toggle('selected',dashboard?el.dataset.page==='dashboard':el.dataset.page==='schedule'));
+}
+function removeOldChrome(){
+  // Mark the old dashboard filter/search/sort toolbar so it stays hidden.
+  $$('#app #status-chips, #app #search, #app #sort').forEach(el=>{
+    const sec=el.closest('section');
+    if(sec && sec!==document.body && !sec.querySelector('.card[data-machine],article[data-machine]')){
+      sec.dataset.micsOldToolbar='1';
+    }
+  });
+  // Locate the original three-mode controller (#view-seg: カード / 一覧 / 日程)
+  // inside #app and relocate it intact to the top-right of #mics-local-tabs.
+  let group=$('#app #view-seg');
+  if(!group){
+    const originalButtons=$$('#app button').filter(b=>!b.closest('#mics-local-tabs') && !b.closest('#mics-products'));
+    const mode=re=>originalButtons.find(b=>re.test(titleText(b).replace(/\\s+/g,'')));
+    const buttons=[/カード$/, /一覧$/, /日程$/].map(mode);
+    if(buttons.every(Boolean)){
+      let candidate=buttons[0].parentElement;
+      for(let i=0;candidate&&i<7&&!buttons.every(b=>candidate.contains(b));i++)candidate=candidate.parentElement;
+      if(candidate && candidate!==document.body && candidate.id!=='app')group=candidate;
+    }
+  }
+  if(group){
+    const sec=group.closest('section');
+    if(sec && sec!==document.body && !sec.querySelector('.card[data-machine],article[data-machine]')){
+      sec.dataset.micsOldToolbar='1';
+    }
+    let dest=$('#mics-local-view-modes',nav);
+    if(!dest){
+      dest=document.createElement('div');
+      dest.id='mics-local-view-modes';
+      dest.addEventListener('click',e=>{
+        if(e.target.closest('button') && showing)closeProducts();
+      });
+      nav.append(dest);
+    }
+    if(group.parentElement!==dest){
+      dest.replaceChildren(group);
+    }
+  }
+  // Independently hide deprecated settings links and old menu toggle.
+  $$('a,button').forEach(el=>{
+    if(el.closest('#mics-local-tabs'))return;
+    if(el.id==='menu-toggle' || /^(Status Setting|Status Settings|Alias Setting|Alias Settings|ステータス設定|エイリアス設定)$/i.test(titleText(el))){
+      el.hidden=true;
+    }
+  });
+}
+const machineKey=r=>Number(r.machine_no??r.machine??r.machine_number);
+const parseDate=v=>{if(!v)return NaN;const s=String(v);return Date.parse(/[zZ]$|[+-]\\d\\d:\\d\\d$/.test(s)?s:s.replace(' ','T')+'+09:00')};
+const formatDate=v=>{const n=parseDate(v);return Number.isFinite(n)?new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',month:'2-digit',day:'2-digit',weekday:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(n)):String(v||'—')};
+const duration=r=>{const a=parseDate(r.start_at),b=parseDate(r.end_at);if(!Number.isFinite(a)||!Number.isFinite(b)||b<a)return '—';const mins=Math.round((b-a)/60000);return mins>=1440?Math.floor(mins/1440)+'日'+Math.floor(mins%1440/60)+'時間':Math.floor(mins/60)+'時間'+mins%60+'分'};
+function render(){
+ const q=$('#mics-products-search',page).value.normalize('NFKC').toLowerCase().trim();
+ const sort=$('#mics-products-sort',page).value;
+ const selected=rows.filter(r=>!q||[r.machine_no,r.order_no,r.product_name,r.mold_no,r.mold_name,r.color].some(v=>String(v??'').normalize('NFKC').toLowerCase().includes(q)));
+ selected.sort((a,b)=>sort==='start'?(parseDate(a.start_at)||0)-(parseDate(b.start_at)||0)||byOrder(machineKey(a))-byOrder(machineKey(b)):sort==='order'?String(a.order_no||'').localeCompare(String(b.order_no||''),'ja'):byOrder(machineKey(a))-byOrder(machineKey(b))||(parseDate(a.start_at)||0)-(parseDate(b.start_at)||0));
+ $('#mics-products-count',page).textContent=selected.length+' 件 / 全'+rows.length+' 件 · ローカル保存データ';
+ $('#mics-products-rows',page).innerHTML=selected.length?selected.map((r,i)=>'<tr><td>'+ (i+1) +'</td><td><b>'+esc(machineKey(r))+'号機</b></td><td>'+esc(r.order_no||'—')+'</td><td>'+esc(r.product_name||'—')+'</td><td><b>'+esc(r.mold_no||'—')+'</b><small>'+esc(r.mold_name||'')+'</small></td><td>'+esc(formatDate(r.start_at))+'</td><td>'+esc(formatDate(r.end_at))+'</td><td>'+esc(duration(r))+'</td></tr>').join(''):'<tr><td colspan="8" class="mics-empty">該当する品番はありません</td></tr>';
+}
+async function load(){
+ if(loading)return;loading=true;
+ try{
+  const [a,b]=await Promise.all([fetch('/data/schedule-local.json',{cache:'no-store'}),fetch('/data/machines.json',{cache:'no-store'})]);
+  if(!a.ok)throw Error('schedule-local.json HTTP '+a.status);
+  const schedule=await a.json(), machines=b.ok?await b.json():{machines:[]};
+  const scheduled=Array.isArray(schedule.rows)?schedule.rows:[];
+  const active=Array.isArray(machines.machines)?machines.machines:[];
+  // Every scheduled order for every machine; include a running machine only if no matching order is scheduled.
+  const known=new Set(scheduled.map(r=>machineKey(r)+'|'+String(r.order_no??'')));
+  rows=scheduled.slice();
+  for(const m of active)if(m.order_no&&!known.has(machineKey(m)+'|'+String(m.order_no)))rows.unshift({...m,start_at:m.start_at||m.started_at||'',end_at:m.end_at||m.scheduled_end_at||''});
+  render();
+ }catch(err){$('#mics-products-count',page).textContent='ローカルJSONの読み込みに失敗しました: '+err.message}
+ finally{loading=false}
+}
+function openProducts(){
+ showing=true;page.hidden=false;document.body.classList.add('mics-products-open');
+ $$('[data-page]',nav).forEach(el=>el.classList.toggle('selected',el.dataset.page==='products'));
+ void load();
+}
+dashboardLink.addEventListener('click',e=>{
+ if(dashboard && showing){e.preventDefault();closeProducts();}
+});
+productButton.addEventListener('click',openProducts);
+$('#mics-products-search',page).addEventListener('input',render);
+$('#mics-products-sort',page).addEventListener('change',render);
+if('EventSource' in window){try{const sse=new EventSource('/api/live');sse.addEventListener('mics-json',e=>{if(!showing)return;try{const kind=JSON.parse(e.data).kind;if(kind==='machines'||kind==='schedule')void load()}catch{}})}catch{}}
+document.addEventListener('DOMContentLoaded',removeOldChrome);
+if(document.readyState!=='loading')removeOldChrome();
+// The original runtime mounts its controls asynchronously and may replace them
+// when its view rerenders. Reattach the real buttons only when DOM nodes change.
+let chromeScheduled=false;
+const chromeObserver=new MutationObserver(records=>{
+ if(!records.some(record=>record.addedNodes.length||record.removedNodes.length))return;
+ if(chromeScheduled)return;
+ chromeScheduled=true;
+ queueMicrotask(()=>{chromeScheduled=false;removeOldChrome()});
+});
+chromeObserver.observe(document.body,{childList:true,subtree:true});
+})();`;
+const localTabsCSS="\n/* Compact horizontal menu – the existing upper-right card/list/calendar control is untouched. */\n#mics-local-tabs{position:sticky;top:0;z-index:100;display:flex!important;flex-wrap:wrap;gap:5px;align-items:center!important;min-height:48px;width:100%;box-sizing:border-box;padding:8px 12px;background:#fff;border-bottom:1px solid #dce3ef;font:600 13px/1.3 system-ui,\"Noto Sans JP\",sans-serif}\n#mics-local-tabs>[data-page]{display:inline-flex;align-items:center;text-decoration:none;color:#31445f;background:transparent;border:1px solid transparent;border-radius:7px;padding:9px 13px;font:inherit;cursor:pointer}\n#mics-local-tabs>[data-page].selected,#mics-local-tabs>[data-page]:hover{background:#eaf1ff;border-color:#b7cdfb;color:#1451cb}\nbody.mics-products-open> :not(#mics-local-tabs):not(#mics-products):not(script){display:none!important}\n#mics-products{padding:18px 14px 32px;background:#fff;min-height:80vh;color:#12233f;font:13px/1.5 system-ui,\"Noto Sans JP\",sans-serif}\n#mics-products[hidden]{display:none!important}\n.mics-products-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px}\n.mics-products-head h2{font-size:19px;font-weight:800;margin:0}.mics-products-head p{font-size:12px;color:#64748b;margin:2px 0}\n.mics-products-actions{display:flex;gap:8px;flex-wrap:wrap}\n.mics-products-actions input,.mics-products-actions select{border:1px solid #cbd5e1;border-radius:8px;padding:9px 11px;background:#fff;min-width:175px}\n.mics-products-actions input{min-width:min(320px,80vw)}\n.mics-products-scroll{overflow-x:auto;border:1px solid #cbd5e1;border-radius:10px}\n#mics-products table{border-collapse:collapse;width:100%;min-width:880px;text-align:left}\n#mics-products th{background:#eff4fa;font-weight:700;color:#45566e;font-size:12px;padding:10px;border-bottom:1px solid #cbd5e1}\n#mics-products td{padding:9px 10px;border-bottom:1px solid #e0e7f1;vertical-align:top}\n#mics-products tr:nth-child(even){background:#f7f9fc}\n#mics-products tr:hover td{background:#ebf2ff}\n#mics-products td small{display:block;font-size:11px;color:#64748b}\n#mics-products .mics-empty{text-align:center;padding:22px}\n#mics-local-view-modes{display:flex;align-items:center;justify-content:flex-end;margin-left:auto;flex:0 0 auto}\n#mics-local-view-modes>div{display:inline-flex;align-items:center}\n#mics-local-view-modes button{white-space:nowrap}\n[data-mics-old-toolbar=\"1\"],#app #menu-toggle,#app #status-chips,#app #search,#app #sort,#app section:has(#status-chips),#app section:has(#search){display:none!important}\n@media(max-width:750px){#mics-local-tabs{flex-wrap:wrap}#mics-local-view-modes{margin-left:auto}}\n@media(max-width:650px){#mics-local-tabs{padding:5px;gap:1px}#mics-local-tabs>[data-page]{padding:8px;font-size:11px}#mics-products{padding:10px 6px}}\n";
 writeFileSync(join(output,'js','local-horizontal-tabs.js'),localTabsJS);
 writeFileSync(join(output,'css','local-horizontal-tabs.css'),localTabsCSS);
 execFileSync(process.execPath,['--check',join(output,'js','local-horizontal-tabs.js')],{stdio:'inherit'});
