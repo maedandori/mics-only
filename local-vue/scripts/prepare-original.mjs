@@ -228,6 +228,39 @@ common=common.slice(0,saveStart)+cloudSave+common.slice(saveEnd);
 common=common.replace("export const ALIASES_JSON_URL = '/api/ui-template/aliases';","export const ALIASES_JSON_URL = '/api/ui-template/aliases';");
 common=common.replace("export const STATUS_JSON_URL = '/api/ui-template/status-colors';","export const STATUS_JSON_URL = '/api/ui-template/status-colors';");
 common=common.replaceAll('Machine-Control D1 JSON','MICS-only local JSON');
+
+// Local status colors are always read from the agent's data/status-colors.json
+// instead of any browser-stored settings or online D1 requests.
+const statusStart=common.indexOf('export function getStatusConfig() {');
+const statusEnd=common.indexOf('export function statusStyle(',statusStart);
+if(statusStart<0||statusEnd<=statusStart)throw Error('Missing original status helpers');
+const statusReadOnly=[
+"export function getStatusConfig() {",
+"  const data=typeof window!=='undefined' ? window.MICS_STATUS_COLORS : null;",
+"  return normalizeStatusConfig(data?.codes ? data : DEFAULT_CONFIG);",
+"}",
+"export async function loadStatusConfig() {",
+"  const r=await fetch('/data/status-colors.json',{cache:'no-store'});",
+"  if(!r.ok)throw new Error('Local status-colors.json HTTP '+r.status);",
+"  const data=await r.json();",
+"  if(!data?.default||!data?.codes)throw new Error('Invalid local status-colors.json');",
+"  const cfg=normalizeStatusConfig(data);",
+"  if(typeof window!=='undefined')window.MICS_STATUS_COLORS=cfg;",
+"  return cfg;",
+"}",
+"export async function saveStatusConfig(cfg) {",
+"  return {savedToFile:false,cfg:normalizeStatusConfig(cfg),",
+"   error:'読み取り専用です。Machine-Controlで編集してD1から同期してください'};",
+"}",
+"export async function resetStatusConfig() {",
+"  return saveStatusConfig(normalizeStatusConfig(DEFAULT_CONFIG));",
+"}",
+"",
+].join('\n');
+common=common.slice(0,statusStart)+statusReadOnly+common.slice(statusEnd);
+common=common.replace("export const STATUS_JSON_URL = '/api/ui-template/status-colors';",
+ "export const STATUS_JSON_URL = '/data/status-colors.json';");
+
 writeFileSync(commonPath,common);
 
 // Preserve layout but make dashboard cards the default on every new page.
@@ -280,6 +313,19 @@ aliasApp=aliasApp.replace(
   "if (msg) pushToast(res.savedToFile ? \`\${msg} (D1 → ローカル同期)\` : \`${res.savedLocal ? 'ローカルJSON保存済み・' : ''}保存不可: \${res.error || '通信エラー'}\`, res.savedToFile ? 'ok' : 'err');"
 );
 writeFileSync(aliasAppPath,aliasApp);
+
+
+// Local status page shows the synced file; editing belongs to online Admin.
+const statusPage=resolve(root,'js/status-colors-app.js');
+let statusUi=readFileSync(statusPage,'utf8');
+statusUi=statusUi.replaceAll('vue/data/status-colors.json','data/status-colors.json');
+statusUi=statusUi.replace(
+ '変更は <b>data/status-colors.json</b> に自動保存され、全画面に即時反映されます。',
+ '表示色は <b>data/status-colors.json</b> から読み込みます。変更は Machine-Controlで保存し、D1 → Local 同期してください。');
+statusUi=statusUi.replace('💾 status-colors.json に保存','🔒 読み取り専用');
+statusUi=statusUi.replace('@click="saveToFile"','disabled title="D1 → Local 同期専用"');
+writeFileSync(statusPage,statusUi);
+
 
 for(const page of ['index.html','change-schedule.html','status-colors.html','change-aliases.html']){
  const file=resolve(root,page);let html=readFileSync(file,'utf8');

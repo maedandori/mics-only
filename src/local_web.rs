@@ -169,26 +169,52 @@ fn record_alias_status(state:&LocalState,status:&str){
     }
 }
 // D1 is the ONLY writable alias source; agent may read but never upload aliases.
+// One authenticated pull replaces BOTH configurations (D1 -> local only).
 pub fn sync_aliases_now(state:&LocalState)->Result<(),String>{
  let _lock=state.alias_file_lock.lock().map_err(|_|"LOCK_ERROR".to_string())?;
  let result=(||->Result<(),String>{
   let (url,token)=alias_cloud_credentials(state).ok_or("NOT_CONFIGURED")?;
-  let response=ureq::AgentBuilder::new().timeout(Duration::from_secs(8)).build()
-   .get(&url).set("Authorization",&format!("Bearer {token}")).call()
-   .map_err(|e|match e{
-     ureq::Error::Status(401|403,_)=>"AUTH_FAILED".to_owned(),
-     ureq::Error::Status(code,_)=>format!("HTTP_{code}"),
-     _=>"NETWORK_ERROR".to_owned()
-   })?;
-  let mut bytes=Vec::new();
-  response.into_reader().take(128*1024+1).read_to_end(&mut bytes)
+  let base=url.strip_suffix("/aliases").ok_or("INVALID_CONFIG")?;
+  let status_url=format!("{base}/status-colors");
+  let get=|endpoint:&str,name:&str|->Result<Vec<u8>,String>{
+   let response=ureq::AgentBuilder::new().timeout(Duration::from_secs(8)).build()
+    .get(endpoint).set("Authorization",&format!("Bearer {token}")).call()
+    .map_err(|e|match e{
+      ureq::Error::Status(401|403,_)=>"AUTH_FAILED".to_string(),
+      ureq::Error::Status(code,_)=>format!("HTTP_{code}"),
+      _=>"NETWORK_ERROR".to_string()
+    })?;
+   let mut bytes=Vec::new();
+   response.into_reader().take(128*1024+1).read_to_end(&mut bytes)
     .map_err(|_|"NETWORK_ERROR".to_string())?;
-  validate_template_json(&bytes,"change-aliases.json").map_err(|_|"INVALID_DATA".to_string())?;
-  let path=state.data_path.with_file_name("change-aliases.json");
-  if fs::read(&path).ok().as_deref()!=Some(bytes.as_slice()){
-   save_template_json(&path,&bytes,"change-aliases.json").map_err(|_|"CACHE_ERROR".to_string())?;
+   validate_template_json(&bytes,name).map_err(|e|format!("INVALID_{name}: {e}"))?;
+   Ok(bytes)
+  };
+  // Download and validate both before modifying either file.
+  let aliases=get(&url,"change-aliases.json")?;
+  let colors=get(&status_url,"status-colors.json")?;
+  let alias_path=state.data_path.with_file_name("change-aliases.json");
+  let color_path=state.data_path.with_file_name("status-colors.json");
+  let old_alias=fs::read(&alias_path).ok();
+  let old_color=fs::read(&color_path).ok();
+  let alias_changed=old_alias.as_deref()!=Some(aliases.as_slice());
+  let color_changed=old_color.as_deref()!=Some(colors.as_slice());
+  if alias_changed{
+   save_template_json(&alias_path,&aliases,"change-aliases.json")
+    .map_err(|e|format!("ALIAS_CACHE_ERROR: {e}"))?;
   }
-  // Ignore (but preserve as backup) historical change-aliases.pending.json.
+  if color_changed{
+   if let Err(e)=save_template_json(&color_path,&colors,"status-colors.json"){
+    // A second-file write failure must not report a successful combined sync.
+    if alias_changed{
+     if let Some(prev)=old_alias{
+      let _=save_template_json(&alias_path,&prev,"change-aliases.json");
+     }else{let _=fs::remove_file(&alias_path);}
+    }
+    return Err(format!("STATUS_COLORS_CACHE_ERROR: {e}"))
+   }
+  }
+  // Old change-aliases.pending.json files are never uploaded.
   Ok(())
  })();
  match result{
@@ -232,8 +258,18 @@ fn validate_template_json(bytes:&[u8],name:&str)->Result<(),String>{
                 }))
         })
     } else {
-        value.get("default").and_then(Value::as_object).is_some() &&
-        value.get("codes").and_then(Value::as_object).is_some_and(|m|m.len()<=250)
+        let hex=|s:&str|s.len()==7&&s.starts_with('#')
+            &&s.as_bytes()[1..].iter().all(|c|c.is_ascii_hexdigit());
+        value.get("default").and_then(Value::as_object).is_some_and(|d|
+            d.get("color").and_then(Value::as_str).is_some_and(hex) &&
+            d.get("label").and_then(Value::as_str).is_some_and(|s|s.len()<=300)
+        ) && value.get("codes").and_then(Value::as_object).is_some_and(|m|
+            m.len()<=250 && m.iter().all(|(name,entry)|
+                !name.is_empty()&&name.len()<=30 &&
+                entry.get("color").and_then(Value::as_str).is_some_and(hex) &&
+                entry.get("label").and_then(Value::as_str).is_some_and(|s|s.len()<=300)
+            )
+        )
     };
     if !valid{return Err("Invalid JSON settings schema".into())}
     Ok(())
@@ -287,7 +323,7 @@ fn receive_template_json(stream:&mut TcpStream,first_bytes:&[u8],state:&LocalSta
         reply(stream,"400 Bad Request","text/plain",b"Incomplete request body","no-store");return
     }
     // One-way D1 -> local: local browser must never save or upload alias edits.
-    if name=="change-aliases.json"{
+    if name=="change-aliases.json"||name=="status-colors.json"{
         reply(stream,"405 Method Not Allowed","application/json; charset=utf-8",
             br#"{"ok":false,"error":"Read-only aliases. Edit in Machine-Control Admin and pull D1 -> local."}"#,"no-store");
         return
@@ -335,7 +371,7 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
         }
         match sync_aliases_now(state){
             Ok(())=>{
-                let data=json!({"ok":true,"direction":"D1_TO_LOCAL","status":"SYNCED",
+                let data=json!({"ok":true,"direction":"D1_TO_LOCAL","files":["change-aliases.json","status-colors.json"],"status":"SYNCED",
                    "synced_at":state.alias_last_sync_at.lock().ok().and_then(|v|v.clone())}).to_string();
                 reply(&mut stream,"200 OK","application/json; charset=utf-8",data.as_bytes(),"no-store");
             },

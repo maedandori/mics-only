@@ -223,3 +223,8 @@ The framework-free renderer now memoizes template computed expressions during ea
 Alias changes are authored in Machine-Control Admin. Local Windows agents only GET `/api/mics-failover/aliases` and atomically cache validated content in `data/change-aliases.json`; they never PUT aliases or replay older `change-aliases.pending.json`. The agent pulls on startup and approximately every five minutes. The Windows Settings **Sync Alias D1 → Local** button sends PUT to the loopback agent at `/api/aliases/sync` for an immediate pull, with confirmation based on a successful GET and local file write. Browser alias PUT is read-only/rejected.
 
 For targeted admin sync, Cloudflare queues one command per online mics-only agent in D1. The existing coordinator `/presence` heartbeat (about 60s) delivers the command, the agent pulls alias JSON, and its next heartbeat acknowledges success. Admin shows pending until the agent confirms. This does not affect Firebird leases, printing, `mics.ini`, or DPAPI.
+
+
+## v0.2.32 — Alias + Status Color D1 → local
+
+Both `change-aliases.json` and `status-colors.json` are fetched from authenticated Cloudflare D1 endpoints and validated before updating local files. The existing Settings button and Admin per-agent command download both files in one operation, acknowledging only after the two files were successfully saved. The local status color frontend reads `/data/status-colors.json` from the EXE and no longer uses browser localStorage for status colors. Local alias and status-color writes are disabled. Old local data is retained when either remote fetch fails.

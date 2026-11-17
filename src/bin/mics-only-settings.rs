@@ -168,10 +168,10 @@ fn main() {
         .position((620,658)).size((140,36)).build(&mut close).unwrap();
 
     let mut alias_sync=nwg::Button::default();
-    nwg::Button::builder().text("↓ Sync Alias D1 → Local / 別名同期").parent(&window)
+    nwg::Button::builder().text("↓ Alias + Status Color / 別名・状態色同期").parent(&window)
         .position((25,751)).size((240,36)).build(&mut alias_sync).unwrap();
     let mut alias_label=nwg::Label::default();
-    nwg::Label::builder().text("Alias: D1 → local (read-only)").parent(&window)
+    nwg::Label::builder().text("Alias + Status Color: D1 → local").parent(&window)
         .position((279,753)).size((485,32)).build(&mut alias_label).unwrap();
     let mut alias_notice=nwg::Notice::default();
     nwg::Notice::builder().parent(&window).build(&mut alias_notice).unwrap();
@@ -269,8 +269,8 @@ fn main() {
                 while let Ok(result)=alias_receiver.borrow().try_recv(){
                     alias_sync.set_enabled(true);
                     match result{
-                        Ok(s)=>alias_label.set_text(&format!("Alias: {s}")),
-                        Err(e)=>alias_label.set_text(&format!("Alias FAILED: {e}")),
+                        Ok(s)=>alias_label.set_text(&format!("Alias + Status Color: {s}")),
+                        Err(e)=>alias_label.set_text(&format!("Alias + Status Color FAILED: {e}")),
                     }
                 }
                 return
@@ -284,7 +284,7 @@ fn main() {
             }
             if handle==alias_sync.handle {
                 alias_sync.set_enabled(false);
-                alias_label.set_text("Alias: D1 から取得中...");
+                alias_label.set_text("Alias + Status Color: D1 から取得中...");
                 let tx=alias_sender.as_ref().clone();
                 let sender=alias_notice_sender.clone();
                 thread::spawn(move||{
