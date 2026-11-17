@@ -1,5 +1,5 @@
 // One server-sent event connection handles all local machine/schedule JSON changes.
-// Retain a 60s local-only polling fallback if the agent is unavailable.
+// SSE is primary; cheap local-only version checks every 8s and HTTP fallback every 15s.
 import {readFileSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 
@@ -20,15 +20,13 @@ export function patchLocalJsonLive(root){
   'export schedule refresher'));
  for(const [file,isDashboard] of [['dashboard-app.js',true],['change-schedule-app.js',false]]){
   update('js/'+file,s=>{
-   if(isDashboard){
-    s=once(s,'loadData, loadFromFile,','loadData, loadFromFile, refreshLocalSchedule,','dashboard import schedule refresh');
-   }
+   s=once(s,'loadData, loadFromFile,','loadData, loadFromFile, refreshLocalSchedule,','shared schedule refresh import');
    s=once(s,'    let refreshTimer = null;',
     '    let refreshTimer = null;\n    let liveJsonStream = null;\n    let liveJsonConnected = false;\n    let jsonVersionTimer = null;\n    let knownJsonVersions = null;\n    let versionRequestBusy = false;',
     'SSE connection state');
    // The polling interval remains a fallback only, while the SSE is unavailable.
    s=once(s,'if (data.live) refreshTimer = setInterval(() => load(), 60000);',
-    'if (data.live && !liveJsonConnected) refreshTimer = setInterval(() => load(), 60000);',
+    'if (data.live && !liveJsonConnected) refreshTimer = setInterval(() => load(), 15000);',
     'offline fallback');
    const eventHandler=isDashboard?[
     '    function onLocalJsonEvent(event) {',
@@ -47,7 +45,8 @@ export function patchLocalJsonLive(root){
     '    function onLocalJsonEvent(event) {',
     '      let kind;',
     '      try { kind=JSON.parse(event.data).kind; } catch { return; }',
-    "      if (kind==='machines'||kind==='schedule') { void load(); return; }",
+    "      if (kind==='machines') { void load(); return; }",
+    "      if (kind==='schedule') { void refreshLocalSchedule(true).then(()=>void load()); return; }",
     "      if (kind==='settings') void load();",
     '    }',
    ];
