@@ -248,3 +248,8 @@ Machine-Control Alias Settings now owns an `animations` group inside D1's `ui_te
 ## v0.2.36 — Local JSON live socket (SSE)
 
 Local Windows loopback agent keeps a long-lived Server-Sent Events stream at `http://127.0.0.1:8787/api/live`. A single 1-second metadata-only file watcher monitors `data/machines.json`, `data/schedule-local.json`, and the two local settings JSON files; when their file signatures change it pushes a small `mics-json` event (kind `machines`, `schedule`, or `settings`) to connected local browser tabs. The browser reads the affected JSON file on notification and rerenders only if the content differs. Its former 60-second local JSON polling becomes a fallback during SSE disconnection. No additional Cloudflare D1, Turso, or Firebird reads are generated. Only localhost is bound and event Origin is checked. EventSource automatically reconnects when the agent restarts.
+
+
+## v0.2.37 — Unified change tags in machine nodes and 区分
+
+Machine nodes and planned color/mold-change schedule tables now show `♨ 乾燥` (only when a mold/color change to a drying-tagged mold occurs) together with existing `刻印替え` (same-mold stamp change) or `刻印確認` (mold switch involving a stamp). All view layouts use one display-tags helper and no longer render duplicate drying badges. Alias data remains D1 → local read-only; the existing local SSE watcher and JSON data pipeline are unchanged.

@@ -349,4 +349,7 @@ patchStatusAnimations(root,{readOnly:true});
 // Agent-owned SSE stream notifies local UI immediately when JSON changes.
 const {patchLocalJsonLive}=await import('./patch-local-json-live.mjs');
 patchLocalJsonLive(root);
+// Show event-only 乾燥 and 刻印 tags in machine nodes and 区分 columns.
+const {patchEventTags}=await import('./patch-event-tags.mjs');
+patchEventTags(root);
 console.log('Prepared '+count+' original MICS Vue assets for local JSON and offline bundling');
