@@ -243,3 +243,8 @@ A mold's drying alias indicates that drying is relevant, but the production page
 ## v0.2.35 — Status Animation configuration
 
 Machine-Control Alias Settings now owns an `animations` group inside D1's `ui_template_settings.aliases_json`. Each entry assigns an exact status code to one of `blink`, `pulse`, or `glow`. Local `mics-only` only GETs this configuration through its existing one-way Alias + Status Color sync, stores it in `data/change-aliases.json`, and applies the animation to the entire machine card when `status_code` matches. The local alias animation editor is read-only; edits are made online and pulled down to each agent. The animation is slow and obeys reduced-motion accessibility settings.
+
+
+## v0.2.36 — Local JSON live socket (SSE)
+
+Local Windows loopback agent keeps a long-lived Server-Sent Events stream at `http://127.0.0.1:8787/api/live`. A single 1-second metadata-only file watcher monitors `data/machines.json`, `data/schedule-local.json`, and the two local settings JSON files; when their file signatures change it pushes a small `mics-json` event (kind `machines`, `schedule`, or `settings`) to connected local browser tabs. The browser reads the affected JSON file on notification and rerenders only if the content differs. Its former 60-second local JSON polling becomes a fallback during SSE disconnection. No additional Cloudflare D1, Turso, or Firebird reads are generated. Only localhost is bound and event Origin is checked. EventSource automatically reconnects when the agent restarts.

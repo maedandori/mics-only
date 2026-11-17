@@ -1,6 +1,6 @@
 //! Loopback-only HTTP server. Never bind to a LAN/public interface.
 use serde_json::{json, Value};
-use std::{fs, io::{Read,Write}, net::{TcpListener,TcpStream}, path::{Path,PathBuf}, sync::{Arc,Mutex,atomic::{AtomicU8,AtomicUsize,Ordering}}, thread, time::{Duration,Instant,SystemTime}};
+use std::{fs, io::{Read,Write},  net::{TcpListener,TcpStream}, path::{Path,PathBuf}, sync::{mpsc,Arc,Mutex,atomic::{AtomicU8,AtomicUsize,Ordering}}, thread, time::{Duration,Instant,SystemTime}};
 
 static VUE_ASSETS_STATE: AtomicU8 = AtomicU8::new(0);
 static ACTIVE_WEB_CLIENTS: AtomicUsize = AtomicUsize::new(0);
@@ -20,6 +20,7 @@ pub struct LocalState {
     pub alias_sync_ack: Arc<Mutex<Option<i64>>>,
     pub machines_cache: Arc<Mutex<Option<(SystemTime,Vec<u8>)>>>,
     pub schedule_cache: Arc<Mutex<Option<(SystemTime,Vec<u8>)>>>,
+    pub live_subscribers: Arc<Mutex<Vec<mpsc::Sender<&'static str>>>>,
 }
 impl LocalState {
     pub fn new(data_path:PathBuf)->Self {
@@ -54,6 +55,7 @@ impl LocalState {
             alias_sync_ack:Arc::new(Mutex::new(None)),
             machines_cache:Arc::new(Mutex::new(None)),
             schedule_cache:Arc::new(Mutex::new(None)),
+            live_subscribers:Arc::new(Mutex::new(Vec::new())),
             data_path}
     }
     pub fn set_alias_sync(&self,coordinator_url:&str,token:&str){
@@ -334,6 +336,55 @@ fn receive_template_json(stream:&mut TcpStream,first_bytes:&[u8],state:&LocalSta
     }
 }
 
+// One loopback HTTP streaming connection per browser tab, NOT a D1/WebSocket read.
+// Local file metadata is checked by a single agent-side watcher. No JSON polling
+// requests are made by the browser while this stream remains connected.
+fn serve_live_json(mut stream:TcpStream,state:&LocalState){
+ let head=b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-cache, no-store\r\nConnection: keep-alive\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nContent-Security-Policy: default-src 'self'; connect-src 'self'\r\n\r\n";
+ if stream.write_all(head).is_err()||stream.write_all(b"retry: 2500\n: connected\n\n").is_err(){return}
+ let (tx,rx)=mpsc::channel::<&'static str>();
+ match state.live_subscribers.lock(){
+  Ok(mut clients)=>clients.push(tx),
+  Err(_)=>return
+ }
+ loop{
+  let message=match rx.recv_timeout(Duration::from_secs(15)){
+   Ok(kind)=>format!("event: mics-json\ndata: {{\"kind\":\"{kind}\"}}\n\n"),
+   Err(mpsc::RecvTimeoutError::Timeout)=>": heartbeat\n\n".to_string(),
+   Err(mpsc::RecvTimeoutError::Disconnected)=>break
+  };
+  if stream.write_all(message.as_bytes()).is_err(){break}
+ }
+}
+fn json_file_signature(path:&Path)->Option<(SystemTime,u64)>{
+ let meta=fs::metadata(path).ok()?;
+ Some((meta.modified().ok()?,meta.len()))
+}
+fn start_local_json_watcher(state:LocalState){
+ thread::spawn(move||{
+  let targets=[
+   (state.data_path.clone(),"machines"),
+   (state.data_path.with_file_name("schedule-local.json"),"schedule"),
+   (state.data_path.with_file_name("change-aliases.json"),"settings"),
+   (state.data_path.with_file_name("status-colors.json"),"settings")
+  ];
+  let mut known=targets.iter().map(|(path,_)|json_file_signature(path)).collect::<Vec<_>>();
+  loop{
+   // A single inexpensive metadata check; no D1/Turso requests, no JSON parsing.
+   thread::sleep(Duration::from_secs(1));
+   for (i,(path,kind)) in targets.iter().enumerate(){
+    let next=json_file_signature(path);
+    if next==known[i]{continue}
+    known[i]=next;
+    if next.is_none(){continue}
+    if let Ok(mut clients)=state.live_subscribers.lock(){
+     clients.retain(|tx|tx.send(kind).is_ok());
+    }
+   }
+  }
+ });
+}
+
 fn serve(mut stream:TcpStream,state:&LocalState) {
     let _=stream.set_nodelay(true);
     let _=stream.set_read_timeout(Some(Duration::from_millis(400)));
@@ -359,6 +410,20 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     }
 
     let route=path.split('?').next().unwrap_or("");
+    if route=="/api/live"{
+        if method!="GET"{
+            reply(&mut stream,"405 Method Not Allowed","text/plain",b"GET required","no-store");return
+        }
+        // Reject cross-site EventSource requests, even when Host is localhost.
+        let origin=req.lines().find_map(|l|l.split_once(':').and_then(|(k,v)|
+            k.eq_ignore_ascii_case("Origin").then_some(v.trim().to_ascii_lowercase())));
+        if origin.as_ref().is_some_and(|v|v!="http://127.0.0.1:8787"&&v!="http://localhost:8787"){
+            reply(&mut stream,"403 Forbidden","text/plain",b"Origin rejected","no-store");return
+        }
+        let _=stream.set_write_timeout(Some(Duration::from_secs(8)));
+        serve_live_json(stream,state);
+        return
+    }
     if route=="/api/aliases/sync"{
         if method!="PUT"{
             reply(&mut stream,"405 Method Not Allowed","text/plain",b"PUT required","no-store");return
@@ -579,6 +644,7 @@ pub fn start(state:LocalState)->Result<(),String>{
         }
     }
     let listener=listener.ok_or("LOCAL_WEB_BIND_FAILED: port 8787 busy after 20 second restart retry")?;
+    start_local_json_watcher(state.clone());
     thread::spawn(move ||{
         println!("LOCAL_WEB_READY http://127.0.0.1:8787");
         for client in listener.incoming(){
@@ -592,7 +658,7 @@ pub fn start(state:LocalState)->Result<(),String>{
                         });
                     } else {
                         ACTIVE_WEB_CLIENTS.fetch_sub(1,Ordering::Release);
-                        serve(stream,&state);
+                        reply(&mut {let mut s=stream; s},"503 Service Unavailable","text/plain",b"Too many local clients","no-store");
                     }
                 },
                 Err(e)=>eprintln!("LOCAL_WEB_CLIENT_FAILED {e}")
@@ -617,5 +683,29 @@ mod tests {
         let path=std::env::temp_dir().join("mics-only-test-nonexistent-snapshot.json");
         let state=LocalState::new(path);
         assert!(state.snapshot.lock().unwrap()["machines"].as_array().is_some());
+    }
+}
+
+// Verify file-signature based notifications work without reading the JSON body.
+#[cfg(test)]
+mod live_json_tests {
+    use super::json_file_signature;
+    use std::{fs,time::Duration};
+    #[test]
+    fn notices_detect_atomic_json_replacement() {
+        let dir=std::env::temp_dir().join(format!("mics-json-live-{}",std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path=dir.join("machines.json");
+        fs::write(&path,b"{\"machines\":[]}").unwrap();
+        let old=json_file_signature(&path);
+        assert!(old.is_some());
+        // Different byte length is also detected if a filesystem has coarse timestamps.
+        fs::write(&path,b"{\"machines\":[{\"machine_no\":19}]}").unwrap();
+        let changed=json_file_signature(&path);
+        assert_ne!(old,changed);
+        fs::remove_file(&path).unwrap();
+        assert_eq!(json_file_signature(&path),None);
+        let _=fs::remove_dir(&dir);
+        let _=Duration::from_millis(1);
     }
 }

@@ -346,4 +346,7 @@ patchStampChanges(root);
 // Status animations are read-only locally; edits remain on Cloudflare D1.
 const {patchStatusAnimations}=await import('./patch-status-animation.mjs');
 patchStatusAnimations(root,{readOnly:true});
+// Agent-owned SSE stream notifies local UI immediately when JSON changes.
+const {patchLocalJsonLive}=await import('./patch-local-json-live.mjs');
+patchLocalJsonLive(root);
 console.log('Prepared '+count+' original MICS Vue assets for local JSON and offline bundling');
