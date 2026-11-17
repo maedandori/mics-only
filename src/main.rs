@@ -214,7 +214,6 @@ fn upload(c: &Config, sync_token: &str, lease: &Lease, snapshot: Value) -> Resul
     if body["ok"] != true {return Err("Sync not acknowledged by coordinator".into())}
     Ok(())
 }
-#[cfg(windows)]
 fn remote_alias_sync_request(response:&Value,local:&local_web::LocalState){
  let Some(id)=response["alias_sync_command_id"].as_i64().filter(|id|*id>0) else{return};
  if local.alias_sync_ack.lock().ok().and_then(|ack|*ack)==Some(id){return}
@@ -226,6 +225,7 @@ fn remote_alias_sync_request(response:&Value,local:&local_web::LocalState){
   Err(e)=>eprintln!("ALIAS_D1_SYNC_FAILED command_id={id} {e}")
  }
 }
+#[cfg(windows)]
 fn remote_update_request(response:&Value,local:&local_web::LocalState){
     use std::sync::atomic::{AtomicBool,Ordering};
     static CHECKING: AtomicBool=AtomicBool::new(false);
@@ -306,8 +306,8 @@ fn run(c: Config) -> Result<(), String> {
         loop {
             if valid_url&&!presence_secret.is_empty(){
                 if let Ok(response)=presence(&c,&presence_secret,local.alias_sync_ack.lock().ok().and_then(|ack|*ack)){
-                    #[cfg(windows)]
                     remote_alias_sync_request(&response,&local);
+                    #[cfg(windows)]
                     remote_update_request(&response,&local);
                 }
             }
@@ -343,9 +343,9 @@ fn run(c: Config) -> Result<(), String> {
     loop {
         if last_presence.map(|t|t.elapsed()>=Duration::from_secs(60)).unwrap_or(true){
             if let Ok(response)=presence(&c,&coordinator_token,local.alias_sync_ack.lock().ok().and_then(|ack|*ack)){
-                #[cfg(windows)]
                 remote_alias_sync_request(&response,&local);
-                    remote_update_request(&response,&local);
+                #[cfg(windows)]
+                remote_update_request(&response,&local);
             }
             last_presence=Some(std::time::Instant::now());
         }
