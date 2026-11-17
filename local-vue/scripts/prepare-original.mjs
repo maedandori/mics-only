@@ -224,20 +224,25 @@ const saveEnd=common.indexOf('export async function resetAliasConfig()',saveStar
 if(saveStart<0||saveEnd<0)throw Error('Original alias save helper not found');
 const cloudSave=`export async function saveAliasConfig(cfg) {
   const normalized=normalizeAliasConfig(cfg);
-  let response;
   try {
-    response=await fetch(ALIASES_JSON_URL,{
-      method:'PUT', headers:{'Content-Type':'application/json'},
+    const response=await fetch(ALIASES_JSON_URL,{
+      method:'PUT',headers:{'Content-Type':'application/json'},
       body:JSON.stringify(normalized),
     });
-    if(!response.ok)throw new Error('Cloudflare D1 sync HTTP '+response.status);
-    if(typeof globalThis.window!=='undefined')globalThis.window.MICS_CHANGE_ALIASES=normalized;
+    if(!response.ok)throw new Error('Local alias API HTTP '+response.status);
+    const result=await response.json();
+    if(result?.ok!==true||result?.saved_local!==true)throw new Error('Alias was not saved');
+    if(typeof window!=='undefined')window.MICS_CHANGE_ALIASES=normalized;
     const ls=getStorage();
     try{if(ls)ls.setItem(LS_ALIASES,JSON.stringify(normalized))}catch{}
-    return {savedToFile:true,path:'Cloudflare D1 (all machines)',cfg:normalized};
+    if(result.synced!==true){
+      return {savedToFile:false,savedLocal:true,path:'data/change-aliases.json',
+        error:'D1 chưa đồng bộ ('+(result.status||'PENDING')+')',cfg:normalized};
+    }
+    return {savedToFile:true,savedLocal:true,path:'Cloudflare D1',cfg:normalized};
   } catch(e){
-    console.warn('D1 alias sync failed',e);
-    return {savedToFile:false,path:'Cloudflare D1',error:e.message,cfg:normalized};
+    console.warn('Alias save failed',e);
+    return {savedToFile:false,savedLocal:false,error:e.message,cfg:normalized};
   }
 }
 
@@ -296,7 +301,7 @@ const aliasAppPath=resolve(root,'js/change-aliases-app.js');
 let aliasApp=readFileSync(aliasAppPath,'utf8');
 aliasApp=aliasApp.replace(
   "if (msg) pushToast(res.savedToFile ? \`\${msg} (change-aliases.json に保存)\` : msg, 'ok');",
-  "if (msg) pushToast(res.savedToFile ? \`\${msg} (Cloudflare D1 全端末に同期)\` : \`D1同期失敗: \${res.error || res.status || '通信エラー'}\`, res.savedToFile ? 'ok' : 'error');"
+  "if (msg) pushToast(res.savedToFile ? \`\${msg} (Cloudflare D1 全端末に同期)\` : \`${res.savedLocal ? 'ローカルJSON保存済み・' : ''}D1未同期: \${res.error || '通信エラー'}\`, res.savedToFile ? 'ok' : 'err');"
 );
 writeFileSync(aliasAppPath,aliasApp);
 
