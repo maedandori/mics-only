@@ -233,3 +233,8 @@ Both `change-aliases.json` and `status-colors.json` are fetched from authenticat
 ## v0.2.33 — 乾燥 and stamp transitions in the local change schedule
 
 The change schedule now includes drying-assigned mold rows even without color/mold/stamp changes, showing the persistent ♨ 乾燥 badge in daily/weekly grids, chronological list and machine modal. It does not generate false 型替え or 色替え events. Stamp-only transitions on the same mold show 刻印替え; a mold switch involving a stamp shows 刻印確認. This is presentation logic; D1 alias/status sync remains one-way.
+
+
+## v0.2.34 — Only display 乾燥 on actual change events
+
+A mold's drying alias indicates that drying is relevant, but the production pages only show `♨ 乾燥` when a row actually changes **mold (型替え)** or **color (色替え)**. Repeated production product codes of the same mold without a change do not generate drying tags or extra schedule events. Online and local use identical rules; the D1 → local alias/status-color synchronization and cached JSON data remain unchanged.

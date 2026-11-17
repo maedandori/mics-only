@@ -1,4 +1,4 @@
-// Add a fourth alias category, 乾燥, by mold code/name to the original UI.
+// 乾燥 alias identifies molds; display badge ONLY at actual 型替え/色替え events.
 // Run after standard online/local transforms; preserve all original layouts.
 import {readFileSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
@@ -12,14 +12,14 @@ export function patchDryingTemplate(root){
   if(s.split(a).length!==2)throw Error('Drying anchor '+label+' missing/duplicate');
   return s.replace(a,b);
  };
- const badge=(expr)=>'<span v-if="extractDryingMold('+expr+',state.aliasCfg)" class="inline-block rounded-full border border-orange-400 bg-orange-100 text-orange-900 font-bold text-[11px] px-2 py-0.5 whitespace-nowrap">♨ 乾燥</span>';
+ const badge=(expr,types)=>'<span v-if="isDryingChange('+expr+','+types+',state.aliasCfg)" class="inline-block rounded-full border border-orange-400 bg-orange-100 text-orange-900 font-bold text-[11px] px-2 py-0.5 whitespace-nowrap">♨ 乾燥</span>';
  change('common.js',s=>{
   s=once(s,
    '    stamp: Array.isArray(src.stamp) ? normalizeRuleList(src.stamp) : normalizeRuleList(DEFAULT_CHANGE_ALIASES.stamp),',
    '    stamp: Array.isArray(src.stamp) ? normalizeRuleList(src.stamp) : normalizeRuleList(DEFAULT_CHANGE_ALIASES.stamp),\n    drying: Array.isArray(src.drying) ? normalizeRuleList(src.drying) : [],',
    'normalize');
   const fn=[
-  "// A drying requirement follows the mold even without a mold/color change.",
+  "// Only actual mold/color transitions of a tagged mold display 乾燥.",
   "const dryingKey=v=>String(v??'').normalize('NFKC').replace(/\\s+/g,'').toLowerCase();",
   "export function extractDryingMold(row,cfg=null){",
   " const rules=(cfg||getAliasConfig()).drying||[];",
@@ -37,6 +37,8 @@ export function patchDryingTemplate(root){
   " return '';",
   "}",
   "export const isDryingMold=(row,cfg)=>Boolean(extractDryingMold(row,cfg));",
+  "export const isDryingChange=(row,types,cfg)=>Boolean(Array.isArray(types) &&",
+  "  (types.includes('型替え')||types.includes('色替え')) && isDryingMold(row,cfg));",
   "",
   ].join('\n');
   return once(s,'export function extractMoldAlias(',fn+'export function extractMoldAlias(','matcher');
@@ -55,60 +57,43 @@ export function patchDryingTemplate(root){
   s=once(s,'      productPreview,\n      switchCategory,',
    '      productPreview,\n      extractDryingMold,\n      switchCategory,','alias setup');
   s=once(s,'          <!-- Rules Table -->',
-   '          <p v-if="state.cat === \'drying\'" class="text-xs text-orange-900 bg-orange-50 border border-orange-200 rounded-lg p-2 mb-3">♨ 乾燥: 判定名に金型名または金型番号を入力。認識キーワードに同じ金型の別名や番号を追加します。品名では判定せず、対象金型には常に乾燥タグを表示します。</p>\n          <!-- Rules Table -->','alias hint');
+   '          <p v-if="state.cat === \'drying\'" class="text-xs text-orange-900 bg-orange-50 border border-orange-200 rounded-lg p-2 mb-3">♨ 乾燥: 判定名に金型名または金型番号を入力。認識キーワードに同じ金型の別名や番号を追加します。品名では判定せず、型替え・色替えが発生した行のみ「乾燥」タグを表示します。</p>\n          <!-- Rules Table -->','alias hint');
   s=once(s,'@click="quickFillRule(r.product_name)"',
    '@click="quickFillRule(state.cat===\'drying\' ? (r.mold_no || r.mold_name) : r.product_name)"','quickfill');
-  s=once(s,"                  <td class=\"px-2 py-1.5 min-w-[140px] text-xs text-slate-600\">{{ r.mold_name || '—' }}</td>",
-   "                  <td class=\"px-2 py-1.5 min-w-[140px] text-xs text-slate-600\">{{ r.mold_name || '—' }} <span v-if=\"r.drying\" class=\"px-1.5 rounded bg-orange-100 border border-orange-400 text-orange-900 font-bold\">♨ 乾燥</span></td>",'preview badge');
   return s;
  });
  change('dashboard-app.js',s=>{
   s=once(s,'extractColor, extractStamp, extractMoldAlias, productColorStyle,',
-   'extractColor, extractStamp, extractMoldAlias, extractDryingMold, productColorStyle,','dashboard import');
+   'extractColor, extractStamp, extractMoldAlias, extractDryingMold, isDryingChange, productColorStyle,','dashboard import');
   s=once(s,'      productColorStyle,\n      setView,',
-   '      productColorStyle,\n      extractDryingMold,\n      setView,','dashboard setup');
-  s=once(s,'                  <div class="prod-title text-[13px]',
-   '                  '+badge('m')+'\n                  <div class="prod-title text-[13px]','dashboard card');
-  s=once(s,'                    <div class="text-xs text-slate-600">{{ m.mold_name }}</div>',
-   '                    <div class="text-xs text-slate-600">{{ m.mold_name }} '+badge('m')+'</div>','dashboard table');
+   '      productColorStyle,\n      extractDryingMold,\n      isDryingChange,\n      setView,','dashboard setup');
   s=once(s,'              productName: r.product_name,',
-   '              productName: r.product_name,\n              drying: Boolean(extractDryingMold(r,state.aliasCfg)),','dashboard gantt');
+   '              productName: r.product_name,\n              drying: Boolean(isDryingChange(r,a >= ws ? types : [],state.aliasCfg)),','dashboard gantt');
   s=once(s,'<change-tags :types="bar.types" :gantt="true" />{{ bar.productName }}',
    '<change-tags :types="bar.types" :gantt="true" /><span v-if="bar.drying" class="rounded px-1 bg-orange-100 text-orange-900 font-bold">♨ 乾燥</span>{{ bar.productName }}','dashboard gantt badge');
   s=once(s,"                      {{ metricsByMachine[m.machine_no].change.row.mold_name || '—' }}",
-   "                      {{ metricsByMachine[m.machine_no].change.row.mold_name || '—' }} "+badge('metricsByMachine[m.machine_no].change.row'),'next mold');
+   "                      {{ metricsByMachine[m.machine_no].change.row.mold_name || '—' }} "+badge('metricsByMachine[m.machine_no].change.row','metricsByMachine[m.machine_no].change.types'),'next mold');
   return s;
  });
  change('change-schedule-app.js',s=>{
   s=once(s,'extractColor, productColorStyle, annotateScheduleChanges, getAliasConfig,',
-   'extractColor, productColorStyle, extractDryingMold, annotateScheduleChanges, getAliasConfig,','schedule import');
+   'extractColor, productColorStyle, extractDryingMold, isDryingChange, annotateScheduleChanges, getAliasConfig,','schedule import');
   s=once(s,'      productColorStyle,\n      dayPills,',
-   '      productColorStyle,\n      extractDryingMold,\n      dayPills,','schedule setup');
+   '      productColorStyle,\n      extractDryingMold,\n      isDryingChange,\n      dayPills,','schedule setup');
   s=once(s,"          mold_name: r.mold_name || '',",
-   "          mold_name: r.mold_name || '',\n          drying: Boolean(extractDryingMold(r,state.aliasCfg)),",'schedule events');
+   "          mold_name: r.mold_name || '',\n          drying: Boolean(isDryingChange(r,item.types,state.aliasCfg)),",'schedule events');
 
-  // Include assigned 乾燥 molds in the change schedule even with no change event.
-  s=once(s,'        if (!item.types.length) continue;\n        const r = item.r;',
-    '        const r = item.r;\n        const drying = Boolean(extractDryingMold(r,state.aliasCfg));\n        if (!item.types.length && !drying) continue;',
-    'drying-only rows');
-  s=once(s,"        const moldEvents = shiftEvents.filter((ev) => ev.types.includes('型替え') || ev.types.includes('刻印替え')).sort(byTime);",
-    "        const moldEvents = shiftEvents.filter((ev) => ev.types.includes('型替え') || ev.types.includes('刻印替え') || (ev.drying && !ev.types.length)).sort(byTime);",
-    'chronological drying-only events');
-  s=s.replaceAll('型替え・刻印替え予定はありません','型替え・刻印替え・乾燥予定はありません');
-  s=s.replaceAll('型替え・刻印替え一覧','型替え・刻印替え・乾燥一覧');
-  s=s.replaceAll('型替え・刻印替え {{ grp.moldEvents.length }}件','型替え・刻印替え・乾燥 {{ grp.moldEvents.length }}件');
+  // Keep original event-only schedule. A drying alias never creates an event.
   s=once(s,'          cur: r.order_no === m.order_no,',
-    '          cur: r.order_no === m.order_no,\n          drying: Boolean(extractDryingMold(r,state.aliasCfg)),',
-    'modal rows');
+    '          cur: r.order_no === m.order_no,\n          drying: Boolean(isDryingChange(r,types,state.aliasCfg)),',
+    'modal gated');
   s=once(s,'                      {{ row.r.mold_name }}',
     '                      {{ row.r.mold_name }} <span v-if="row.drying" class="inline-block px-1.5 rounded border border-orange-400 bg-orange-100 text-orange-900 font-bold">♨ 乾燥</span>',
-    'modal tag');
+    'modal event badge');
 
   const eventTag='<change-tags :types="ev.types" :small="true" />';
   if(!s.includes(eventTag))throw Error('Schedule change tags missing');
   s=s.replaceAll(eventTag,eventTag+'<span v-if="ev.drying" class="rounded px-1 bg-orange-100 border border-orange-400 text-orange-900 text-[11px] font-bold">♨ 乾燥</span>');
-  const header='<div class="font-bold text-[12.5px] truncate mb-0.5" :title="row.m.mold_name">{{ row.m.mold_name || \'—\' }}</div>';
-  if(!s.includes(header))throw Error('Schedule current mold missing');
-  return s.replaceAll(header,header+'\n                        '+badge('row.m'));
+  return s;
  });
 }
