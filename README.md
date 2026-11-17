@@ -238,3 +238,8 @@ The change schedule now includes drying-assigned mold rows even without color/mo
 ## v0.2.34 — Only display 乾燥 on actual change events
 
 A mold's drying alias indicates that drying is relevant, but the production pages only show `♨ 乾燥` when a row actually changes **mold (型替え)** or **color (色替え)**. Repeated production product codes of the same mold without a change do not generate drying tags or extra schedule events. Online and local use identical rules; the D1 → local alias/status-color synchronization and cached JSON data remain unchanged.
+
+
+## v0.2.35 — Status Animation configuration
+
+Machine-Control Alias Settings now owns an `animations` group inside D1's `ui_template_settings.aliases_json`. Each entry assigns an exact status code to one of `blink`, `pulse`, or `glow`. Local `mics-only` only GETs this configuration through its existing one-way Alias + Status Color sync, stores it in `data/change-aliases.json`, and applies the animation to the entire machine card when `status_code` matches. The local alias animation editor is read-only; edits are made online and pulled down to each agent. The animation is slow and obeys reduced-motion accessibility settings.

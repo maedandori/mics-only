@@ -343,4 +343,7 @@ patchDryingTemplate(root);
 // Keep 刻印替え only for same-mold stamp changes and use 刻印確認 for mold changes.
 const {patchStampChanges}=await import('./patch-stamp-change.mjs');
 patchStampChanges(root);
+// Status animations are read-only locally; edits remain on Cloudflare D1.
+const {patchStatusAnimations}=await import('./patch-status-animation.mjs');
+patchStatusAnimations(root,{readOnly:true});
 console.log('Prepared '+count+' original MICS Vue assets for local JSON and offline bundling');
