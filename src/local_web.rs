@@ -360,6 +360,13 @@ fn json_file_signature(path:&Path)->Option<(SystemTime,u64)>{
  let meta=fs::metadata(path).ok()?;
  Some((meta.modified().ok()?,meta.len()))
 }
+// Stable, cheap local-only version tokens for browser consistency checks.
+// Metadata only: no JSON parsing, Firebird queries or Cloudflare requests.
+fn json_version(path:&Path)->Option<String>{
+ let (mtime,len)=json_file_signature(path)?;
+ let nanos=mtime.duration_since(SystemTime::UNIX_EPOCH).ok()?.as_nanos();
+ Some(format!("{nanos}:{len}"))
+}
 fn start_local_json_watcher(state:LocalState){
  thread::spawn(move||{
   let targets=[
@@ -410,6 +417,22 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     }
 
     let route=path.split('?').next().unwrap_or("");
+    if route=="/api/json-versions"{
+        if method!="GET" && method!="HEAD"{
+            reply(&mut stream,"405 Method Not Allowed","text/plain",b"GET or HEAD required","no-store");return
+        }
+        let versions=json!({
+            "ok":true,
+            "machines":json_version(&state.data_path),
+            "schedule":json_version(&state.data_path.with_file_name("schedule-local.json")),
+            "aliases":json_version(&state.data_path.with_file_name("change-aliases.json")),
+            "colors":json_version(&state.data_path.with_file_name("status-colors.json")),
+            "live_connections":state.live_subscribers.lock().map(|v|v.len()).unwrap_or(0)
+        }).to_string();
+        reply(&mut stream,"200 OK","application/json; charset=utf-8",
+          if method=="HEAD"{&[]}else{versions.as_bytes()},"no-store");
+        return
+    }
     if route=="/api/live"{
         if method!="GET"{
             reply(&mut stream,"405 Method Not Allowed","text/plain",b"GET required","no-store");return
@@ -708,4 +731,19 @@ mod live_json_tests {
         let _=fs::remove_dir(&dir);
         let _=Duration::from_millis(1);
     }
+
+    #[test]
+    fn json_versions_change_on_atomic_json_replacement(){
+        let root=std::env::temp_dir().join(format!("mics-version-{}",std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let file=root.join("machines.json");
+        assert!(json_version(&file).is_none());
+        fs::write(&file,b"{\"machines\":[]}").unwrap();
+        let old=json_version(&file).unwrap();
+        fs::write(&file,b"{\"machines\":[{\"machine_no\":19}]}").unwrap();
+        assert_ne!(json_version(&file).unwrap(),old);
+        let _=fs::remove_file(&file);
+        let _=fs::remove_dir(&root);
+    }
+
 }
