@@ -91,13 +91,13 @@ fn secret(name: &str) -> Result<String, String> {
 fn client() -> ureq::Agent {
     ureq::AgentBuilder::new().timeout(Duration::from_secs(15)).build()
 }
-fn presence(c:&Config,coordinator_token:&str)->Result<Value,String>{
+fn presence(c:&Config,coordinator_token:&str,alias_ack:Option<i64>)->Result<Value,String>{
  if coordinator_token.is_empty()||c.coordinator_url.is_empty(){return Err("Presence credentials missing".into())}
  let url=url::Url::parse(&c.coordinator_url).map_err(|e|e.to_string())?;
  if url.scheme()!="https"||url.host_str().is_none(){return Err("Invalid coordinator URL".into())}
  let result=client().post(&format!("{}/presence",c.coordinator_url.trim_end_matches('/')))
   .set("Authorization",&format!("Bearer {coordinator_token}"))
-  .send_json(json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled,"version":env!("CARGO_PKG_VERSION"),
+  .send_json(json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled,"version":env!("CARGO_PKG_VERSION"),"alias_sync_ack":alias_ack,
    "update_failed_version":env::current_exe().ok().and_then(|p|p.parent().map(|dir|dir.join("data").join("update-blocked-version.txt"))).and_then(|p|fs::read_to_string(p).ok()).map(|v|v.trim().trim_start_matches('v').to_owned())}))
   .map_err(|e|match e {
       ureq::Error::Status(status, response) => {
@@ -215,6 +215,17 @@ fn upload(c: &Config, sync_token: &str, lease: &Lease, snapshot: Value) -> Resul
     Ok(())
 }
 #[cfg(windows)]
+fn remote_alias_sync_request(response:&Value,local:&local_web::LocalState){
+ let Some(id)=response["alias_sync_command_id"].as_i64().filter(|id|*id>0) else{return};
+ if local.alias_sync_ack.lock().ok().and_then(|ack|*ack)==Some(id){return}
+ match local_web::sync_aliases_now(local){
+  Ok(())=>{
+   if let Ok(mut ack)=local.alias_sync_ack.lock(){*ack=Some(id);}
+   println!("ALIAS_D1_SYNC_OK command_id={id}");
+  },
+  Err(e)=>eprintln!("ALIAS_D1_SYNC_FAILED command_id={id} {e}")
+ }
+}
 fn remote_update_request(response:&Value,local:&local_web::LocalState){
     use std::sync::atomic::{AtomicBool,Ordering};
     static CHECKING: AtomicBool=AtomicBool::new(false);
@@ -294,8 +305,9 @@ fn run(c: Config) -> Result<(), String> {
         let mut last_mirror=std::time::Instant::now()-Duration::from_secs(301);
         loop {
             if valid_url&&!presence_secret.is_empty(){
-                if let Ok(response)=presence(&c,&presence_secret){
+                if let Ok(response)=presence(&c,&presence_secret,local.alias_sync_ack.lock().ok().and_then(|ack|*ack)){
                     #[cfg(windows)]
+                    remote_alias_sync_request(&response,&local);
                     remote_update_request(&response,&local);
                 }
             }
@@ -330,9 +342,10 @@ fn run(c: Config) -> Result<(), String> {
     let mut last_presence:Option<std::time::Instant>=None;
     loop {
         if last_presence.map(|t|t.elapsed()>=Duration::from_secs(60)).unwrap_or(true){
-            if let Ok(response)=presence(&c,&coordinator_token){
+            if let Ok(response)=presence(&c,&coordinator_token,local.alias_sync_ack.lock().ok().and_then(|ack|*ack)){
                 #[cfg(windows)]
-                remote_update_request(&response,&local);
+                remote_alias_sync_request(&response,&local);
+                    remote_update_request(&response,&local);
             }
             last_presence=Some(std::time::Instant::now());
         }
@@ -439,7 +452,7 @@ fn test_connection(c:&Config)->Result<(),String>{
     #[cfg(not(windows))]
     let coordinator_token=secret("MICS_COORDINATOR_TOKEN")?;
     if coordinator_token.is_empty(){return Err("Coordinator Token is missing; D1 registration not attempted".into())}
-    presence(c,&coordinator_token).map_err(|e|format!("D1_PRESENCE_FAILED: {e}"))?;
+    presence(c,&coordinator_token,None).map_err(|e|format!("D1_PRESENCE_FAILED: {e}"))?;
     println!("D1_PRESENCE_OK agent_id={} display_name={}",
         c.agent_id,if c.display_name.is_empty(){&c.agent_id}else{&c.display_name});
     println!("NOTE: Each PC MUST have its own unique agent_id in mics.ini.");

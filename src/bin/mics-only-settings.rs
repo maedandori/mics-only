@@ -32,7 +32,7 @@ fn main() {
     let get = |k:&str,d:&str| original.get(k).cloned().unwrap_or_else(||d.into());
 
     let mut window=nwg::Window::default();
-    nwg::Window::builder().size((790,855)).position((190,65))
+    nwg::Window::builder().size((790,915)).position((190,65))
         .title("MICS Only Settings / MICS 予備機設定")
         .build(&mut window).expect("Window error");
 
@@ -167,12 +167,24 @@ fn main() {
     nwg::Button::builder().text("Close / 閉じる").parent(&window)
         .position((620,658)).size((140,36)).build(&mut close).unwrap();
 
+    let mut alias_sync=nwg::Button::default();
+    nwg::Button::builder().text("↓ Sync Alias D1 → Local / 別名同期").parent(&window)
+        .position((25,751)).size((240,36)).build(&mut alias_sync).unwrap();
+    let mut alias_label=nwg::Label::default();
+    nwg::Label::builder().text("Alias: D1 → local (read-only)").parent(&window)
+        .position((279,753)).size((485,32)).build(&mut alias_label).unwrap();
+    let mut alias_notice=nwg::Notice::default();
+    nwg::Notice::builder().parent(&window).build(&mut alias_notice).unwrap();
+    let (alias_sender,alias_receiver)=mpsc::channel::<Result<String,String>>();
+    let alias_sender=Rc::new(alias_sender);
+    let alias_receiver=Rc::new(RefCell::new(alias_receiver));
+
     // Update downloading runs off the UI thread so the progress bar stays responsive.
     let mut update_text=nwg::Label::default();
     nwg::Label::builder().text("Update: idle / 更新待機").parent(&window)
-        .position((25,753)).size((735,24)).build(&mut update_text).unwrap();
+        .position((25,811)).size((735,24)).build(&mut update_text).unwrap();
     let mut update_bar=nwg::ProgressBar::default();
-    nwg::ProgressBar::builder().parent(&window).position((25,782))
+    nwg::ProgressBar::builder().parent(&window).position((25,840))
         .size((735,23)).range(0..100).pos(0).build(&mut update_bar).unwrap();
     let mut update_notice=nwg::Notice::default();
     nwg::Notice::builder().parent(&window).build(&mut update_notice).unwrap();
@@ -190,6 +202,8 @@ fn main() {
     let stop_agent=Rc::new(stop_agent);
     let restart_agent=Rc::new(restart_agent);
     let update_agent=Rc::new(update_agent);
+    let alias_sync=Rc::new(alias_sync);
+    let alias_label=Rc::new(alias_label);
     let save=Rc::new(save);
     let close=Rc::new(close);
     let fields=Rc::new(inputs);
@@ -210,6 +224,12 @@ fn main() {
         let stop_agent=stop_agent.clone();
         let restart_agent=restart_agent.clone();
         let update_agent=update_agent.clone();
+        let alias_sync=alias_sync.clone();
+        let alias_label=alias_label.clone();
+        let alias_sender=alias_sender.clone();
+        let alias_receiver=alias_receiver.clone();
+        let alias_notice_sender=alias_notice.sender();
+        let alias_notice_handle=alias_notice.handle.clone();
         let save=save.clone();
         let close=close.clone();
         let update_sender=update_sender.clone();
@@ -245,11 +265,40 @@ fn main() {
                 }
                 return
             }
+            if event==nwg::Event::OnNotice && handle==alias_notice_handle {
+                while let Ok(result)=alias_receiver.borrow().try_recv(){
+                    alias_sync.set_enabled(true);
+                    match result{
+                        Ok(s)=>alias_label.set_text(&format!("Alias: {s}")),
+                        Err(e)=>alias_label.set_text(&format!("Alias FAILED: {e}")),
+                    }
+                }
+                return
+            }
             if event!=nwg::Event::OnButtonClick {return}
             if handle==close.handle {nwg::stop_thread_dispatch();return}
             if handle==open_web.handle {
                 let _=Command::new("explorer.exe").arg("http://127.0.0.1:8787")
                     .creation_flags(0x08000000).spawn();
+                return
+            }
+            if handle==alias_sync.handle {
+                alias_sync.set_enabled(false);
+                alias_label.set_text("Alias: D1 から取得中...");
+                let tx=alias_sender.as_ref().clone();
+                let sender=alias_notice_sender.clone();
+                thread::spawn(move||{
+                    let result=(||->Result<String,String>{
+                        let response=ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(12)).build()
+                            .put("http://127.0.0.1:8787/api/aliases/sync")
+                            .call().map_err(|e|format!("Local agent unavailable or D1 failed: {e}"))?;
+                        let data:serde_json::Value=response.into_json().map_err(|e|e.to_string())?;
+                        if data["ok"]!=true{return Err(format!("Sync failed: {}",data["error"]))}
+                        Ok(format!("SYNCED D1 → local | {}",data["synced_at"].as_str().unwrap_or("OK")))
+                    })();
+                    let _=tx.send(result);
+                    sender.notice();
+                });
                 return
             }
             if handle==test.handle {
@@ -404,7 +453,7 @@ fn main() {
         }
     });
     // Keep window-owned controls alive for the duration of the event loop.
-    let _controls=(heading,version_label,labels,secret_labels,note,status,test,open_web,start_agent,stop_agent,restart_agent,update_agent,save,close,enable,autostart,state,update_notice,update_text,update_bar);
+    let _controls=(heading,version_label,labels,secret_labels,note,status,test,open_web,start_agent,stop_agent,restart_agent,update_agent,alias_sync,alias_label,alias_notice,save,close,enable,autostart,state,update_notice,update_text,update_bar);
     nwg::dispatch_thread_events();
 }
 #[cfg(not(windows))]

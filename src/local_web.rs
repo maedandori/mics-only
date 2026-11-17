@@ -17,6 +17,7 @@ pub struct LocalState {
     pub alias_sync_status: Arc<Mutex<String>>,
     pub alias_last_sync_at: Arc<Mutex<Option<String>>>,
     pub alias_file_lock: Arc<Mutex<()>>,
+    pub alias_sync_ack: Arc<Mutex<Option<i64>>>,
     pub machines_cache: Arc<Mutex<Option<(SystemTime,Vec<u8>)>>>,
     pub schedule_cache: Arc<Mutex<Option<(SystemTime,Vec<u8>)>>>,
 }
@@ -50,6 +51,7 @@ impl LocalState {
             alias_sync_status:Arc::new(Mutex::new("NOT_CHECKED".into())),
             alias_last_sync_at:Arc::new(Mutex::new(None)),
             alias_file_lock:Arc::new(Mutex::new(())),
+            alias_sync_ack:Arc::new(Mutex::new(None)),
             machines_cache:Arc::new(Mutex::new(None)),
             schedule_cache:Arc::new(Mutex::new(None)),
             data_path}
@@ -166,123 +168,55 @@ fn record_alias_status(state:&LocalState,status:&str){
         }
     }
 }
-// D1 operations are handled by the agent, never by browser JavaScript.
-fn upload_cloud_alias(url:&str,token:&str,bytes:&[u8])->Result<(),String>{
-    let result=ureq::AgentBuilder::new().timeout(Duration::from_secs(6)).build()
-        .put(url).set("Authorization",&format!("Bearer {token}"))
-        .set("Content-Type","application/json").send_bytes(bytes);
-    match result{
-        Ok(resp) if resp.status()==200=>Ok(()),
-        Ok(resp)=>Err(format!("HTTP_{}",resp.status())),
-        Err(ureq::Error::Status(401|403,_))=>Err("AUTH_FAILED".into()),
-        Err(ureq::Error::Status(code,_))=>Err(format!("HTTP_{code}")),
-        Err(_)=>Err("NETWORK_ERROR".into())
-    }
+// D1 is the ONLY writable alias source; agent may read but never upload aliases.
+pub fn sync_aliases_now(state:&LocalState)->Result<(),String>{
+ let _lock=state.alias_file_lock.lock().map_err(|_|"LOCK_ERROR".to_string())?;
+ let result=(||->Result<(),String>{
+  let (url,token)=alias_cloud_credentials(state).ok_or("NOT_CONFIGURED")?;
+  let response=ureq::AgentBuilder::new().timeout(Duration::from_secs(8)).build()
+   .get(&url).set("Authorization",&format!("Bearer {token}")).call()
+   .map_err(|e|match e{
+     ureq::Error::Status(401|403,_)=>"AUTH_FAILED".to_owned(),
+     ureq::Error::Status(code,_)=>format!("HTTP_{code}"),
+     _=>"NETWORK_ERROR".to_owned()
+   })?;
+  let mut bytes=Vec::new();
+  response.into_reader().take(128*1024+1).read_to_end(&mut bytes)
+    .map_err(|_|"NETWORK_ERROR".to_string())?;
+  validate_template_json(&bytes,"change-aliases.json").map_err(|_|"INVALID_DATA".to_string())?;
+  let path=state.data_path.with_file_name("change-aliases.json");
+  if fs::read(&path).ok().as_deref()!=Some(bytes.as_slice()){
+   save_template_json(&path,&bytes,"change-aliases.json").map_err(|_|"CACHE_ERROR".to_string())?;
+  }
+  // Ignore (but preserve as backup) historical change-aliases.pending.json.
+  Ok(())
+ })();
+ match result{
+  Ok(())=>{
+   if let Ok(mut t)=state.alias_last_check.lock(){*t=Some(Instant::now());}
+   record_alias_status(state,"SYNCED");
+   Ok(())
+  },
+  Err(e)=>{
+   record_alias_status(state,&e);
+   Err(e)
+  }
+ }
 }
-
-fn fetch_cloud_alias(state:&LocalState) {
-    // One periodic check per PC, with any unsent local edit uploaded first.
-    let refresh=state.alias_last_check.lock().ok().map(|mut last|{
-        if last.as_ref().is_some_and(|t|t.elapsed()<Duration::from_secs(60)){false}
-        else{*last=Some(Instant::now());true}
-    }).unwrap_or(false);
-    if !refresh{return}
-    let _alias_guard=match state.alias_file_lock.lock(){
-        Ok(lock)=>lock,
-        Err(_)=>{record_alias_status(state,"LOCK_ERROR");return}
-    };
-    let Some((url,token))=alias_cloud_credentials(state) else {
-        record_alias_status(state,"NOT_CONFIGURED");
-        return
-    };
-    let pending=state.data_path.with_file_name("change-aliases.pending.json");
-    if pending.exists(){
-        let bytes=match fs::read(&pending){
-            Ok(b)=>b,
-            Err(_)=>{record_alias_status(state,"PENDING_READ_ERROR");return}
-        };
-        if validate_template_json(&bytes,"change-aliases.json").is_err(){
-            record_alias_status(state,"INVALID_PENDING");
-            return
-        }
-        if let Err(e)=upload_cloud_alias(&url,&token,&bytes){
-            eprintln!("ALIAS_PENDING_UPLOAD_FAILED {e}");
-            record_alias_status(state,"PENDING_D1_ERROR");
-            return // Never replace unsent edits with older D1 data.
-        }
-        if fs::remove_file(&pending).is_err(){
-            record_alias_status(state,"PENDING_CLEAR_ERROR");
-            return
-        }
-        record_alias_status(state,"SYNCED");
-    }
-    let response=ureq::AgentBuilder::new().timeout(Duration::from_secs(6)).build()
-        .get(&url).set("Authorization",&format!("Bearer {token}")).call();
-    match response {
-        Ok(resp)=>{
-            let mut bytes=Vec::new();
-            if resp.into_reader().take(128*1024+1).read_to_end(&mut bytes).is_err(){
-                record_alias_status(state,"NETWORK_ERROR");
-                return
-            }
-            let path=state.data_path.with_file_name("change-aliases.json");
-            if let Err(e)=validate_template_json(&bytes,"change-aliases.json"){
-                eprintln!("ALIAS_SYNC_INVALID_JSON {e}");
-                record_alias_status(state,"INVALID_DATA");
-                return
-            }
-            if fs::read(&path).ok().as_deref()!=Some(bytes.as_slice()){
-                if let Err(e)=save_template_json(&path,&bytes,"change-aliases.json"){
-                    eprintln!("ALIAS_SYNC_CACHE_FAILED {e}");
-                    record_alias_status(state,"CACHE_ERROR");
-                    return
-                }
-            }
-            record_alias_status(state,"SYNCED");
-        },
-        Err(ureq::Error::Status(401|403,_))=>record_alias_status(state,"AUTH_FAILED"),
-        Err(ureq::Error::Status(code,_))=>{
-            eprintln!("ALIAS_SYNC_HTTP_{code}");
-            record_alias_status(state,"HTTP_ERROR");
-        },
-        Err(_)=>record_alias_status(state,"NETWORK_ERROR")
-    }
+fn fetch_cloud_alias(state:&LocalState){
+ let refresh=state.alias_last_check.lock().ok().map(|mut last|{
+  if last.as_ref().is_some_and(|t|t.elapsed()<Duration::from_secs(300)){false}
+  else{*last=Some(Instant::now());true}
+ }).unwrap_or(false);
+ if refresh{
+  if let Err(e)=sync_aliases_now(state){eprintln!("ALIAS_D1_PULL_FAILED {e}")}
+ }
 }
 pub fn start_alias_sync(state:LocalState){
-    thread::spawn(move ||{
-        loop{
-            fetch_cloud_alias(&state);
-            thread::sleep(Duration::from_secs(60));
-        }
-    });
-}
-fn put_cloud_alias(state:&LocalState,body:&[u8])->Result<bool,String>{
-    // First persist to both the local cache and a durable retry queue.
-    let _alias_guard=state.alias_file_lock.lock().map_err(|_|"Alias lock error".to_string())?;
-    let path=state.data_path.with_file_name("change-aliases.json");
-    let pending=state.data_path.with_file_name("change-aliases.pending.json");
-    save_template_json(&path,body,"change-aliases.json")?;
-    save_template_json(&pending,body,"change-aliases.json")?;
-    let Some((url,token))=alias_cloud_credentials(state) else {
-        record_alias_status(state,"LOCAL_ONLY");
-        return Ok(false)
-    };
-    match upload_cloud_alias(&url,&token,body){
-        Ok(())=>{
-            if fs::remove_file(&pending).is_err(){
-                record_alias_status(state,"PENDING_CLEAR_ERROR");
-                return Ok(false)
-            }
-            if let Ok(mut last)=state.alias_last_check.lock(){*last=Some(Instant::now());}
-            record_alias_status(state,"SYNCED");
-            Ok(true)
-        },
-        Err(e)=>{
-            eprintln!("ALIAS_PUT_PENDING {e}");
-            record_alias_status(state,"LOCAL_SAVED_D1_PENDING");
-            Ok(false) // Local saved, remote failed: never report D1 success.
-        }
-    }
+ thread::spawn(move ||loop{
+  fetch_cloud_alias(&state);
+  thread::sleep(Duration::from_secs(300));
+ });
 }
 
 fn validate_template_json(bytes:&[u8],name:&str)->Result<(),String>{
@@ -352,18 +286,14 @@ fn receive_template_json(stream:&mut TcpStream,first_bytes:&[u8],state:&LocalSta
     if body.len()<length {
         reply(stream,"400 Bad Request","text/plain",b"Incomplete request body","no-store");return
     }
-    let res=if name=="change-aliases.json" {
-        put_cloud_alias(state,&body[..length])
-    }else{save_template_json(&file,&body[..length],name).map(|_|false)};
-    match res{
-        Ok(synced)=>{
-            let status=state.alias_sync_status.lock().map(|s|s.clone()).unwrap_or("UNKNOWN".into());
-            let result=if name=="change-aliases.json"{
-                json!({"ok":true,"saved_local":true,"synced":synced,"status":status})
-            }else{json!({"ok":true,"saved_local":true})};
-            let bytes=result.to_string();
-            reply(stream,"200 OK","application/json; charset=utf-8",bytes.as_bytes(),"no-store");
-        },
+    // One-way D1 -> local: local browser must never save or upload alias edits.
+    if name=="change-aliases.json"{
+        reply(stream,"405 Method Not Allowed","application/json; charset=utf-8",
+            br#"{"ok":false,"error":"Read-only aliases. Edit in Machine-Control Admin and pull D1 -> local."}"#,"no-store");
+        return
+    }
+    match save_template_json(&file,&body[..length],name){
+        Ok(())=>reply(stream,"200 OK","application/json; charset=utf-8",br#"{"ok":true,"saved_local":true}"#,"no-store"),
         Err(e)=>reply(stream,"400 Bad Request","text/plain",e.as_bytes(),"no-store")
     }
 }
@@ -393,6 +323,29 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     }
 
     let route=path.split('?').next().unwrap_or("");
+    if route=="/api/aliases/sync"{
+        if method!="PUT"{
+            reply(&mut stream,"405 Method Not Allowed","text/plain",b"PUT required","no-store");return
+        }
+        let allowed=req.lines().find_map(|l|l.split_once(':').and_then(|(k,v)|
+            k.eq_ignore_ascii_case("Origin").then_some(v.trim().to_ascii_lowercase())))
+            .is_none_or(|v|v=="http://127.0.0.1:8787"||v=="http://localhost:8787");
+        if !allowed{
+            reply(&mut stream,"403 Forbidden","text/plain",b"Origin rejected","no-store");return
+        }
+        match sync_aliases_now(state){
+            Ok(())=>{
+                let data=json!({"ok":true,"direction":"D1_TO_LOCAL","status":"SYNCED",
+                   "synced_at":state.alias_last_sync_at.lock().ok().and_then(|v|v.clone())}).to_string();
+                reply(&mut stream,"200 OK","application/json; charset=utf-8",data.as_bytes(),"no-store");
+            },
+            Err(e)=>{
+                let data=json!({"ok":false,"direction":"D1_TO_LOCAL","error":e}).to_string();
+                reply(&mut stream,"502 Bad Gateway","application/json; charset=utf-8",data.as_bytes(),"no-store");
+            }
+        }
+        return
+    }
     if let Some((file,name))=template_settings_file(state,route){
         if method=="PUT"{
             receive_template_json(&mut stream,&buf[..n],state,route);

@@ -216,3 +216,10 @@ The framework-free renderer now memoizes template computed expressions during ea
 - Versioned static assets under `/vue-v0.2.27/` use browser caching (`max-age=3600`) for instant 0ms navigation across the 4 pages.
 - Direct `/data/change-aliases.json` and `/data/status-colors.json` routes are served from the local `data/` directory, and alias edits persist locally first so offline local web editing works even without Cloudflare D1 connectivity.
 - Component `<template>` fragments are parsed once and cached in `vanilla-runtime.js`, alias rules are precompiled and memoized with `WeakMap`, and `sessionStorage` snapshot hydration renders nodes on frame 0 while refreshing local JSON in the background.
+
+
+## v0.2.31 — one-way alias sync (D1 → mics-only)
+
+Alias changes are authored in Machine-Control Admin. Local Windows agents only GET `/api/mics-failover/aliases` and atomically cache validated content in `data/change-aliases.json`; they never PUT aliases or replay older `change-aliases.pending.json`. The agent pulls on startup and approximately every five minutes. The Windows Settings **Sync Alias D1 → Local** button sends PUT to the loopback agent at `/api/aliases/sync` for an immediate pull, with confirmation based on a successful GET and local file write. Browser alias PUT is read-only/rejected.
+
+For targeted admin sync, Cloudflare queues one command per online mics-only agent in D1. The existing coordinator `/presence` heartbeat (about 60s) delivers the command, the agent pulls alias JSON, and its next heartbeat acknowledges success. Admin shows pending until the agent confirms. This does not affect Firebird leases, printing, `mics.ini`, or DPAPI.
