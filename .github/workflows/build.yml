@@ -19,6 +19,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Verify Rust, frontend, and release versions match
+        id: version
+        shell: pwsh
+        run: |
+          $cargo = Get-Content Cargo.toml -Raw
+          $match = [regex]::Match($cargo, '(?m)^version\s*=\s*"(\d+\.\d+\.\d+)"')
+          if (!$match.Success) { throw 'Cargo.toml version not found' }
+          $version = $match.Groups[1].Value
+          $frontend = (Get-Content local-vue/package.json -Raw | ConvertFrom-Json).version
+          if ($frontend -ne $version) { throw "Version mismatch: Cargo=$version, frontend=$frontend" }
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version"
       - name: Build original HTML/CSS/JavaScript template (no Vue)
         working-directory: local-vue
         run: |
@@ -27,34 +38,34 @@ jobs:
       - name: Verify original vanilla JS template files
         shell: pwsh
         run: |
-          if (!(Test-Path www/vue-v0.2.40/index.html)) { throw 'Vue index missing' }
+          if (!(Test-Path www/vue-v${{ steps.version.outputs.version }}/index.html)) { throw 'Vue index missing' }
           foreach ($page in @('change-schedule.html','status-colors.html','change-aliases.html')) {
-            if (!(Test-Path (Join-Path 'www/vue-v0.2.40' $page))) { throw "Original template page missing: $page" }
+            if (!(Test-Path (Join-Path 'www/vue-v${{ steps.version.outputs.version }}' $page))) { throw "Original template page missing: $page" }
           }
           foreach ($file in @('change-aliases.json','status-colors.json')) {
-            if (!(Test-Path (Join-Path 'www/vue-v0.2.40/data' $file))) { throw "Settings JSON missing: $file" }
+            if (!(Test-Path (Join-Path 'www/vue-v${{ steps.version.outputs.version }}/data' $file))) { throw "Settings JSON missing: $file" }
           }
-          if (!(Get-ChildItem www/vue-v0.2.40/assets -Filter '*.js')) { throw 'Vue JS asset missing' }
-          if (!(Get-ChildItem www/vue-v0.2.40/assets -Filter '*.css')) { throw 'Template CSS asset missing' }
-          if (!(Test-Path www/vue-v0.2.40/js/vanilla-runtime.js)) { throw 'Native JS runtime missing' }
-          $layoutCss = 'www/vue-v0.2.40/css/tailwind-generated.css'
+          if (!(Get-ChildItem www/vue-v${{ steps.version.outputs.version }}/assets -Filter '*.js')) { throw 'Vue JS asset missing' }
+          if (!(Get-ChildItem www/vue-v${{ steps.version.outputs.version }}/assets -Filter '*.css')) { throw 'Template CSS asset missing' }
+          if (!(Test-Path www/vue-v${{ steps.version.outputs.version }}/js/vanilla-runtime.js)) { throw 'Native JS runtime missing' }
+          $layoutCss = 'www/vue-v${{ steps.version.outputs.version }}/css/tailwind-generated.css'
           if (!(Test-Path $layoutCss) -or (Get-Item $layoutCss).Length -lt 4000) { throw 'Machine grid CSS missing from current release' }
-          if (!(Test-Path www/vue-v0.2.40/assets/compiled-expressions.js)) { throw 'Precompiled template expressions missing' }
-          $schedule=Get-Content www/vue-v0.2.40/js/change-schedule-app.js -Raw
+          if (!(Test-Path www/vue-v${{ steps.version.outputs.version }}/assets/compiled-expressions.js)) { throw 'Precompiled template expressions missing' }
+          $schedule=Get-Content www/vue-v${{ steps.version.outputs.version }}/js/change-schedule-app.js -Raw
           if ($schedule -notmatch 'if \(!item\.types\.length\) continue') { throw 'Original event-only schedule filtering is missing' }
           if ($schedule -match 'if \(!item\.types\.length && !drying\) continue') { throw 'Drying-only non-event rows were reintroduced' }
           if ($schedule -notmatch 'isDryingChange\(r,item\.types,state\.aliasCfg\)') { throw 'Drying tag is not gated by mold/color events' }
-          $common=Get-Content www/vue-v0.2.40/js/common.js -Raw
+          $common=Get-Content www/vue-v${{ steps.version.outputs.version }}/js/common.js -Raw
           if (!$common.Contains("types.push('刻印確認')")) { throw 'Stamp confirmation is missing' }
           if (!$common.Contains("if (nextStamp) types.push('刻印確認');")) { throw 'Wrong stamp confirmation: must check the NEXT product only' }
           if ($common.Contains("if (prevStamp || nextStamp) types.push('刻印確認');")) { throw 'Stamp inherited from previous mold again' }
           if (!$common.Contains('isDryingChange')) { throw 'Drying transition helper is missing' }
-          $aliasPage=Get-Content www/vue-v0.2.40/js/change-aliases-app.js -Raw
+          $aliasPage=Get-Content www/vue-v${{ steps.version.outputs.version }}/js/change-aliases-app.js -Raw
           if (!$aliasPage.Contains("id: 'animation'")) { throw 'Status animation tab is absent' }
           if (!$aliasPage.Contains('const animationReadOnly = true')) { throw 'Local animation editing must stay read-only' }
-          $aliasCommon=Get-Content www/vue-v0.2.40/js/common.js -Raw
+          $aliasCommon=Get-Content www/vue-v${{ steps.version.outputs.version }}/js/common.js -Raw
           if (!$aliasCommon.Contains('machineAnimationEffect')) { throw 'Local alias JSON animation matching absent' }
-          $dashboard=Get-Content www/vue-v0.2.40/js/dashboard-app.js -Raw
+          $dashboard=Get-Content www/vue-v${{ steps.version.outputs.version }}/js/dashboard-app.js -Raw
           if (!$dashboard.Contains('mics-node-anim-blink')) { throw 'Full-node status animation is absent' }
           if ($dashboard.Contains('extractDryingMold(m,state.aliasCfg)')) { throw 'Drying tag still permanently shown on each mold' }
           if (!$dashboard.Contains("new EventSource('/api/live')")) { throw 'Dashboard live JSON stream missing' }
@@ -66,10 +77,10 @@ jobs:
           if (!$dashboard.Contains('changeEventTags(metricsByMachine[m.machine_no].change.row,metricsByMachine[m.machine_no].change.types,state.aliasCfg)')) { throw 'Machine node change tags missing' }
           if (!$schedule.Contains('ev.displayTypes')) { throw 'Schedule table is not using unified event tags' }
           if (!$dashboard.Contains('refreshLocalSchedule')) { throw 'Dashboard must refresh changed schedule JSON' }
-          if (!$dashboard.Contains('変更予測') -or !$dashboard.Contains('次の品番')) { throw 'Machine node missing next-change time and product' }
+          if (!$dashboard.Contains('mics-next-compact') -or !$dashboard.Contains('次の金型')) { throw 'Machine node missing compact next-change panel' }
           if (!$dashboard.Contains('品番替え')) { throw 'Local product-only change detection absent' }
           if (!$dashboard.Contains('refreshLocalSchedule(true)')) { throw 'SSE schedule update still throttled' }
-          $compiled=Get-Content www/vue-v0.2.40/js/dashboard-app.js -Raw
+          $compiled=Get-Content www/vue-v${{ steps.version.outputs.version }}/js/dashboard-app.js -Raw
           if ($compiled.Contains("from 'vue'")) { throw 'Vue runtime reference remained' }
       - name: Test local next-change detection (JSON only)
         run: node --test local-vue/tests/next-change.test.mjs
@@ -114,8 +125,8 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.2.40
-          name: MICS Only v0.2.40
+          tag_name: v${{ steps.version.outputs.version }}
+          name: MICS Only v${{ steps.version.outputs.version }}
           target_commitish: ${{ github.sha }}
           draft: false
           prerelease: false
