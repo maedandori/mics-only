@@ -352,4 +352,7 @@ patchLocalJsonLive(root);
 // Show event-only 乾燥 and 刻印 tags in machine nodes and 区分 columns.
 const {patchEventTags}=await import('./patch-event-tags.mjs');
 patchEventTags(root);
+// Mirror online next-change type/time and product code on local machine cards.
+const {patchNextChange}=await import('./patch-local-next-change.mjs');
+patchNextChange(root);
 console.log('Prepared '+count+' original MICS Vue assets for local JSON and offline bundling');
