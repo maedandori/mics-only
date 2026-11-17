@@ -120,6 +120,17 @@ jobs:
               }catch{}
             }
             if(!$healthy){throw 'New Windows build failed API boot smoke test'}
+            # Streaming SSE endpoint is verified independently, so headless DOM
+            # rendering does not wait on an intentionally never-ending stream.
+            $http=[System.Net.Http.HttpClient]::new()
+            try {
+              $live=$http.GetAsync('http://127.0.0.1:8787/api/live',[System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+              try {
+                if(!$live.IsSuccessStatusCode -or $live.Content.Headers.ContentType.MediaType -ne 'text/event-stream'){
+                  throw 'Local live JSON streaming endpoint failed'
+                }
+              } finally { $live.Dispose() }
+            } finally { $http.Dispose() }
             $dashboardResponse=Invoke-WebRequest 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 5
             if($dashboardResponse.StatusCode -ne 200 -or $dashboardResponse.Content -notlike '*vue-v0.2.36/*'){throw 'Original template not active'}
             $legacy=Invoke-WebRequest 'http://127.0.0.1:8787/?legacy=1' -UseBasicParsing -TimeoutSec 5
@@ -141,7 +152,7 @@ jobs:
             ) | Where-Object {Test-Path -LiteralPath $_} | Select-Object -First 1
             if(!$chrome){throw 'Headless Chrome/Edge unavailable for required browser rendering test'}
             $profile=Join-Path $env:RUNNER_TEMP 'mics-only-browser-profile'
-            $dom=(& $chrome '--headless=new' '--disable-gpu' '--no-first-run' '--no-default-browser-check' '--disable-extensions' "--user-data-dir=$profile" '--virtual-time-budget=12000' '--dump-dom' 'http://127.0.0.1:8787/' 2>$null | Out-String)
+            $dom=(& $chrome '--headless=new' '--disable-gpu' '--no-first-run' '--no-default-browser-check' '--disable-extensions' "--user-data-dir=$profile" '--virtual-time-budget=12000' '--dump-dom' 'http://127.0.0.1:8787/?ci-smoke=1' 2>$null | Out-String)
             if($dom -notmatch 'data-machine="15"' -or $dom -notmatch 'data-machine="19"'){
               throw "Browser rendered no real machine cards; HTML length $($dom.Length)"
             }

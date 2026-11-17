@@ -54,6 +54,8 @@ export function patchLocalJsonLive(root){
    const shared=[
     '    function startLocalJsonLive() {',
     "      if (typeof EventSource!=='function') return;",
+    "      // Headless DOM smoke test checks rendering separately from SSE streaming.",
+    "      if (new URLSearchParams(location.search).has('ci-smoke')) return;",
     "      liveJsonStream=new EventSource('/api/live');",
     "      liveJsonStream.addEventListener('mics-json',onLocalJsonEvent);",
     '      liveJsonStream.onopen=()=>{',
