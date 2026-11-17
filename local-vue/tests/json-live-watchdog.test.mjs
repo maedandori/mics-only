@@ -16,7 +16,13 @@ test('machine/schedule pages use SSE, local version watchdog and reconnect refre
   assert.ok(page.includes('void load();'))
   assert.ok(page.includes('liveJsonStream?.close()'))
   assert.ok(page.includes('clearInterval(jsonVersionTimer)'))
+  assert.ok(page.includes('refreshLocalSchedule'))
  }
+})
+test('schedule SSE events bypass old cache throttle and refresh production times',()=>{
+ assert.ok(schedule.includes('void refreshLocalSchedule(true).then(()=>void load())'))
+ assert.ok(dashboard.includes('void refreshLocalSchedule(true).then(() => {'))
+ assert.ok(schedule.includes('setInterval(() => load(), 15000)'))
 })
 test('pending dashboard updates replay when initial JSON fetch is still running',()=>{
  assert.ok(dashboard.includes('let loadBusy = false, loadQueued = false;'))
