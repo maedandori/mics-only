@@ -315,4 +315,7 @@ for(const page of ['index.html','change-schedule.html','status-colors.html','cha
  writeFileSync(file,html);
 }
 writeFileSync(resolve(root,'tailwind-input.css'),'@tailwind base;\n@tailwind components;\n@tailwind utilities;\n');
+// Reuse the same 乾燥 mold aliases and tags as Machine-Control online.
+const {patchDryingTemplate}=await import('./patch-drying.mjs');
+patchDryingTemplate(root);
 console.log('Prepared '+count+' original MICS Vue assets for local JSON and offline bundling');
