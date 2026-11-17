@@ -253,3 +253,8 @@ Local Windows loopback agent keeps a long-lived Server-Sent Events stream at `ht
 ## v0.2.37 — Unified change tags in machine nodes and 区分
 
 Machine nodes and planned color/mold-change schedule tables now show `♨ 乾燥` (only when a mold/color change to a drying-tagged mold occurs) together with existing `刻印替え` (same-mold stamp change) or `刻印確認` (mold switch involving a stamp). All view layouts use one display-tags helper and no longer render duplicate drying badges. Alias data remains D1 → local read-only; the existing local SSE watcher and JSON data pipeline are unchanged.
+
+
+## v0.2.38 — Correct incoming-mold 刻印確認
+
+On mold transitions, `刻印確認` now appears only if the **incoming** job's product name matches a configured stamp alias. A stamp found on the previous mold cannot cause an incorrect tag on a following unmarked mold. Same-mold `刻印替え` and event-only `乾燥` are unchanged. Machine node badges and 区分 tables use this rule. This release supersedes v0.2.37.

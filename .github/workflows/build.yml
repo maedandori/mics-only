@@ -27,32 +27,34 @@ jobs:
       - name: Verify original vanilla JS template files
         shell: pwsh
         run: |
-          if (!(Test-Path www/vue-v0.2.37/index.html)) { throw 'Vue index missing' }
+          if (!(Test-Path www/vue-v0.2.38/index.html)) { throw 'Vue index missing' }
           foreach ($page in @('change-schedule.html','status-colors.html','change-aliases.html')) {
-            if (!(Test-Path (Join-Path 'www/vue-v0.2.37' $page))) { throw "Original template page missing: $page" }
+            if (!(Test-Path (Join-Path 'www/vue-v0.2.38' $page))) { throw "Original template page missing: $page" }
           }
           foreach ($file in @('change-aliases.json','status-colors.json')) {
-            if (!(Test-Path (Join-Path 'www/vue-v0.2.37/data' $file))) { throw "Settings JSON missing: $file" }
+            if (!(Test-Path (Join-Path 'www/vue-v0.2.38/data' $file))) { throw "Settings JSON missing: $file" }
           }
-          if (!(Get-ChildItem www/vue-v0.2.37/assets -Filter '*.js')) { throw 'Vue JS asset missing' }
-          if (!(Get-ChildItem www/vue-v0.2.37/assets -Filter '*.css')) { throw 'Template CSS asset missing' }
-          if (!(Test-Path www/vue-v0.2.37/js/vanilla-runtime.js)) { throw 'Native JS runtime missing' }
-          $layoutCss = 'www/vue-v0.2.37/css/tailwind-generated.css'
+          if (!(Get-ChildItem www/vue-v0.2.38/assets -Filter '*.js')) { throw 'Vue JS asset missing' }
+          if (!(Get-ChildItem www/vue-v0.2.38/assets -Filter '*.css')) { throw 'Template CSS asset missing' }
+          if (!(Test-Path www/vue-v0.2.38/js/vanilla-runtime.js)) { throw 'Native JS runtime missing' }
+          $layoutCss = 'www/vue-v0.2.38/css/tailwind-generated.css'
           if (!(Test-Path $layoutCss) -or (Get-Item $layoutCss).Length -lt 4000) { throw 'Machine grid CSS missing from current release' }
-          if (!(Test-Path www/vue-v0.2.37/assets/compiled-expressions.js)) { throw 'Precompiled template expressions missing' }
-          $schedule=Get-Content www/vue-v0.2.37/js/change-schedule-app.js -Raw
+          if (!(Test-Path www/vue-v0.2.38/assets/compiled-expressions.js)) { throw 'Precompiled template expressions missing' }
+          $schedule=Get-Content www/vue-v0.2.38/js/change-schedule-app.js -Raw
           if ($schedule -notmatch 'if \(!item\.types\.length\) continue') { throw 'Original event-only schedule filtering is missing' }
           if ($schedule -match 'if \(!item\.types\.length && !drying\) continue') { throw 'Drying-only non-event rows were reintroduced' }
           if ($schedule -notmatch 'isDryingChange\(r,item\.types,state\.aliasCfg\)') { throw 'Drying tag is not gated by mold/color events' }
-          $common=Get-Content www/vue-v0.2.37/js/common.js -Raw
+          $common=Get-Content www/vue-v0.2.38/js/common.js -Raw
           if (!$common.Contains("types.push('刻印確認')")) { throw 'Stamp confirmation is missing' }
+          if (!$common.Contains("if (nextStamp) types.push('刻印確認');")) { throw 'Wrong stamp confirmation: must check the NEXT product only' }
+          if ($common.Contains("if (prevStamp || nextStamp) types.push('刻印確認');")) { throw 'Stamp inherited from previous mold again' }
           if (!$common.Contains('isDryingChange')) { throw 'Drying transition helper is missing' }
-          $aliasPage=Get-Content www/vue-v0.2.37/js/change-aliases-app.js -Raw
+          $aliasPage=Get-Content www/vue-v0.2.38/js/change-aliases-app.js -Raw
           if (!$aliasPage.Contains("id: 'animation'")) { throw 'Status animation tab is absent' }
           if (!$aliasPage.Contains('const animationReadOnly = true')) { throw 'Local animation editing must stay read-only' }
-          $aliasCommon=Get-Content www/vue-v0.2.37/js/common.js -Raw
+          $aliasCommon=Get-Content www/vue-v0.2.38/js/common.js -Raw
           if (!$aliasCommon.Contains('machineAnimationEffect')) { throw 'Local alias JSON animation matching absent' }
-          $dashboard=Get-Content www/vue-v0.2.37/js/dashboard-app.js -Raw
+          $dashboard=Get-Content www/vue-v0.2.38/js/dashboard-app.js -Raw
           if (!$dashboard.Contains('mics-node-anim-blink')) { throw 'Full-node status animation is absent' }
           if ($dashboard.Contains('extractDryingMold(m,state.aliasCfg)')) { throw 'Drying tag still permanently shown on each mold' }
           if (!$dashboard.Contains("new EventSource('/api/live')")) { throw 'Dashboard live JSON stream missing' }
@@ -61,7 +63,7 @@ jobs:
           if (!$dashboard.Contains('changeEventTags(metricsByMachine[m.machine_no].change.row,metricsByMachine[m.machine_no].change.types,state.aliasCfg)')) { throw 'Machine node change tags missing' }
           if (!$schedule.Contains('ev.displayTypes')) { throw 'Schedule table is not using unified event tags' }
           if (!$dashboard.Contains('refreshLocalSchedule')) { throw 'Dashboard must refresh changed schedule JSON' }
-          $compiled=Get-Content www/vue-v0.2.37/js/dashboard-app.js -Raw
+          $compiled=Get-Content www/vue-v0.2.38/js/dashboard-app.js -Raw
           if ($compiled.Contains("from 'vue'")) { throw 'Vue runtime reference remained' }
       - name: Test Rust
         run: cargo test
@@ -99,7 +101,7 @@ jobs:
           $folder = Join-Path $env:RUNNER_TEMP 'mics-only-smoke'
           New-Item -ItemType Directory -Force -Path $folder | Out-Null
           Expand-Archive -LiteralPath dist/MICS-Only-Portable-Windows.zip -DestinationPath $folder -Force
-          foreach ($name in @('mics-only.exe','mics-only-settings.exe','www/index.html','www/app.js','www/vue-v0.2.37/index.html')) {
+          foreach ($name in @('mics-only.exe','mics-only-settings.exe','www/index.html','www/app.js','www/vue-v0.2.38/index.html')) {
             if (!(Test-Path -LiteralPath (Join-Path $folder $name))) { throw "ZIP missing $name" }
           }
           Copy-Item -LiteralPath (Join-Path $folder 'mics.ini.example') -Destination (Join-Path $folder 'mics.ini')
@@ -119,7 +121,7 @@ jobs:
               if($agent.HasExited){throw "Agent exited early, code $($agent.ExitCode)"}
               try{
                 $status=Invoke-RestMethod 'http://127.0.0.1:8787/api/status' -TimeoutSec 1
-                if($status.ok -eq $true -and $status.version -eq '0.2.37'){$healthy=$true;break}
+                if($status.ok -eq $true -and $status.version -eq '0.2.38'){$healthy=$true;break}
               }catch{}
             }
             if(!$healthy){throw 'New Windows build failed API boot smoke test'}
@@ -135,14 +137,14 @@ jobs:
               } finally { $live.Dispose() }
             } finally { $http.Dispose() }
             $dashboardResponse=Invoke-WebRequest 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 5
-            if($dashboardResponse.StatusCode -ne 200 -or $dashboardResponse.Content -notlike '*vue-v0.2.37/*'){throw 'Original template not active'}
+            if($dashboardResponse.StatusCode -ne 200 -or $dashboardResponse.Content -notlike '*vue-v0.2.38/*'){throw 'Original template not active'}
             $legacy=Invoke-WebRequest 'http://127.0.0.1:8787/?legacy=1' -UseBasicParsing -TimeoutSec 5
             if($legacy.Content -notlike '*id="machines"*'){throw 'Legacy fallback missing'}
-            $index=Get-Content (Join-Path $folder 'www/vue-v0.2.37/index.html') -Raw
-            $refs=[regex]::Matches($index, '(?:src|href)="/vue-v0.2.37/(assets/[^"?]+)"')
+            $index=Get-Content (Join-Path $folder 'www/vue-v0.2.38/index.html') -Raw
+            $refs=[regex]::Matches($index, '(?:src|href)="/vue-v0.2.38/(assets/[^"?]+)"')
             if($refs.Count -lt 1){throw 'No Vite assets referenced'}
             foreach($asset in $refs){
-              $url='http://127.0.0.1:8787/vue-v0.2.37/'+$asset.Groups[1].Value
+              $url='http://127.0.0.1:8787/vue-v0.2.38/'+$asset.Groups[1].Value
               $res=Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 5
               if($res.StatusCode -ne 200 -or $res.RawContentLength -lt 20){throw "Bundled asset failed: $url"}
             }
@@ -163,7 +165,7 @@ jobs:
             $cardCount=([regex]::Matches($dom,'data-machine="(?:15|8|19|14|5|17|13|6|10|11|18|7|12|16)"')).Count
             if($cardCount -lt 14){throw "Browser rendered $cardCount of 14 machine cards"}
             # A missing template must fall back to the classic UI, not kill agent.
-            $vueIndexFile=Join-Path $folder 'www/vue-v0.2.37/index.html'
+            $vueIndexFile=Join-Path $folder 'www/vue-v0.2.38/index.html'
             Rename-Item -LiteralPath $vueIndexFile -NewName 'index.html.smoketest'
             try {
               $fallback=Invoke-WebRequest 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 5
@@ -171,14 +173,14 @@ jobs:
               $statusAfterFallback=Invoke-RestMethod 'http://127.0.0.1:8787/api/status' -TimeoutSec 5
               if($statusAfterFallback.ok -ne $true){throw 'Missing template affected agent API'}
             } finally {
-              Rename-Item -LiteralPath (Join-Path $folder 'www/vue-v0.2.37/index.html.smoketest') -NewName 'index.html'
+              Rename-Item -LiteralPath (Join-Path $folder 'www/vue-v0.2.38/index.html.smoketest') -NewName 'index.html'
             }
             # Direct local JSON is valid even before the Firebird reader produces a snapshot.
             $machineJson=Invoke-RestMethod 'http://127.0.0.1:8787/data/machines.json' -TimeoutSec 5
             if($null -eq $machineJson.machines){throw 'Direct local machines JSON endpoint failed'}
             $scheduleJson=Invoke-RestMethod 'http://127.0.0.1:8787/data/schedule-local.json' -TimeoutSec 5
             if($null -eq $scheduleJson.rows){throw 'Direct local schedule JSON endpoint failed'}
-            $templateLoader=Get-Content (Join-Path $folder 'www/vue-v0.2.37/js/common.js') -Raw
+            $templateLoader=Get-Content (Join-Path $folder 'www/vue-v0.2.38/js/common.js') -Raw
             if($templateLoader -notlike '*/data/machines.json*' -or $templateLoader -notlike '*/data/schedule-local.json*'){throw 'Template did not use direct local JSON'}
             $alias=Invoke-RestMethod 'http://127.0.0.1:8787/api/ui-template/aliases' -TimeoutSec 5
             if($null -eq $alias.color -or $null -eq $alias.mold -or $null -eq $alias.stamp){throw 'Invalid local alias response'}
@@ -195,8 +197,8 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.2.37
-          name: MICS Only v0.2.37
+          tag_name: v0.2.38
+          name: MICS Only v0.2.38
           target_commitish: ${{ github.sha }}
           draft: false
           prerelease: false

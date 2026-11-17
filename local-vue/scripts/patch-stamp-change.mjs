@@ -32,10 +32,10 @@ export function patchStampChanges(root){
    "  if (nextColor && prevColor && nextColor !== prevColor) types.push('色替え');",
    "  const nextStamp = extractStamp(nextRow, cfg);",
    "  // 刻印替え: same mold but different stamp, including stamp install/removal.",
-   "  // 刻印確認: mold changed and either side has a recognized stamp.",
+   "  // 刻印確認: mold changed and the NEXT product has a recognized 刻印 alias.",
    "  // With no stamps, a normal mold change must not generate a stamp tag.",
    "  if (moldChanged) {",
-   "    if (prevStamp || nextStamp) types.push('刻印確認');",
+   "    if (nextStamp) types.push('刻印確認');",
    "  } else if ((nextStamp || prevStamp) && nextStamp !== prevStamp) {",
    "    types.push('刻印替え');",
    "  }"
