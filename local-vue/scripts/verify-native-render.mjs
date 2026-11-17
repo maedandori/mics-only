@@ -50,4 +50,7 @@ assert.match(tabsJs,/\$\('#app #view-seg'\)/,'Horizontal tabs must relocate #vie
 assert.match(tabsJs,/dest\.replaceChildren\(group\)/,'Relocated #view-seg must replace stale controls on rerender');
 assert.match(tabsCss,/#mics-local-tabs>\[data-page\]/,'Tab button styles must not override #view-seg segmented buttons');
 assert.match(tabsCss,/#app #status-chips,#app #search,#app #sort/,'Old dashboard filter toolbar must be hidden');
+assert.match(dashboard,/Math\.floor\(anchor\.getHours\(\) \/ scale\.step\) \* scale\.step/,'Gantt hourly views must trim passed/deleted hours');
+assert.match(dashboard,/d\.hourLabels\.length/,'Gantt template must use per-day hourLabels');
+assert.match(dashboard,/d\.width \+ 'px'/,'Gantt template must use per-day width');
 console.log('PASS original nodes, cached computations, first-paint JSON loading, diagnostics and CSS');

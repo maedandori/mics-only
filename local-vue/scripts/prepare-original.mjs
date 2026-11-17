@@ -299,6 +299,173 @@ dashboard=dashboard.replace("      window.addEventListener('storage', onStorage)
  "      window.addEventListener('storage', onStorage);\n      window.addEventListener('mics-local-schedule-ready', onLocalScheduleReady);");
 dashboard=dashboard.replace("      window.removeEventListener('storage', onStorage);",
  "      window.removeEventListener('storage', onStorage);\n      window.removeEventListener('mics-local-schedule-ready', onLocalScheduleReady);");
+// Trim passed/deleted hours in hourly Gantt views (日程) so no empty leading gap appears.
+replaceDashboard(`      ws = new Date(ws.getFullYear(), ws.getMonth(), ws.getDate());
+      we = new Date(we.getFullYear(), we.getMonth(), we.getDate() + 1);
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      if (today < we) ws = today;
+
+      const dayWidth = state.ganttDayWidth;
+      const scale = ganttScaleInfo(dayWidth);
+      const span = we - ws;
+      const pos = (d) => ((d - ws) / span) * 100;
+
+      const days = [];
+      for (let d = new Date(ws); d < we; d.setDate(d.getDate() + 1)) {
+        const copy = new Date(d);
+        days.push({
+          key: copy.toISOString(),
+          label: \`\${copy.getMonth() + 1}/\${copy.getDate()}\`,
+          dow: DOW[copy.getDay()],
+          isSun: copy.getDay() === 0,
+          isSat: copy.getDay() === 6,
+        });
+      }
+
+      const hourLabels = [];
+      if (scale.step < 24) {
+        const slots = 24 / scale.step;
+        const slotW = dayWidth / slots;
+        for (let h = 0; h < 24; h += scale.step) {
+          hourLabels.push(slotW >= 36 ? \`\${h}:00\` : slotW >= 24 ? \`\${h}時\` : String(h));
+        }
+      }
+
+      const trackWidth = days.length * dayWidth;`,
+`      ws = new Date(ws.getFullYear(), ws.getMonth(), ws.getDate());
+      we = new Date(we.getFullYear(), we.getMonth(), we.getDate() + 1);
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      let earliestActive = null;
+      for (const m of list) {
+        const s = state.data.schedules[m.machine_no];
+        if (!s) continue;
+        for (const r of s.rows) {
+          if (!r.mold_no) continue;
+          const rs = parseDate(r.start_at);
+          const re = parseDate(r.end_at);
+          if (!rs || !re || re <= today) continue;
+          const visibleStart = rs < now && re > now ? now : rs;
+          if (!earliestActive || visibleStart < earliestActive) earliestActive = visibleStart;
+        }
+      }
+
+      const dayWidth = state.ganttDayWidth;
+      const scale = ganttScaleInfo(dayWidth);
+      if (today < we) ws = today;
+      if (earliestActive) {
+        const earliestDay = new Date(earliestActive.getFullYear(), earliestActive.getMonth(), earliestActive.getDate());
+        if (earliestDay > ws && earliestDay < we) ws = earliestDay;
+      }
+      if (scale.step < 24) {
+        let anchor = now > ws ? now : ws;
+        if (earliestActive && earliestActive > anchor) anchor = earliestActive;
+        const slotHour = Math.floor(anchor.getHours() / scale.step) * scale.step;
+        const slotStart = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), slotHour, 0, 0, 0);
+        if (slotStart < we) ws = slotStart;
+      }
+
+      const span = we - ws;
+      const pos = (d) => ((d - ws) / span) * 100;
+
+      const days = [];
+      const slots = scale.step < 24 ? 24 / scale.step : 0;
+      const slotW = slots ? dayWidth / slots : dayWidth;
+      for (let cursor = new Date(ws); cursor < we; ) {
+        const nextMidnight = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
+        const segEnd = nextMidnight < we ? nextMidnight : we;
+        const startHour = scale.step < 24 ? cursor.getHours() : 0;
+        const endHour = segEnd.getDate() !== cursor.getDate() || segEnd.getMonth() !== cursor.getMonth()
+          ? 24
+          : segEnd.getHours();
+        const dayHourLabels = [];
+        if (scale.step < 24) {
+          for (let h = startHour; h < endHour; h += scale.step) {
+            dayHourLabels.push(slotW >= 36 ? \`\${h}:00\` : slotW >= 24 ? \`\${h}時\` : String(h));
+          }
+        }
+        const width = scale.step < 24 ? dayHourLabels.length * slotW : dayWidth;
+        days.push({
+          key: cursor.toISOString(),
+          label: \`\${cursor.getMonth() + 1}/\${cursor.getDate()}\`,
+          dow: DOW[cursor.getDay()],
+          isSun: cursor.getDay() === 0,
+          isSat: cursor.getDay() === 6,
+          width,
+          hourLabels: dayHourLabels,
+        });
+        cursor = nextMidnight;
+      }
+
+      const hourLabels = days.find((d) => d.hourLabels.length)?.hourLabels || [];
+      const trackWidth = days.reduce((sum, d) => sum + d.width, 0);`);
+replaceDashboard(`                      <div
+                        v-for="d in ganttModel.days"
+                        :key="d.key"
+                        class="flex flex-col justify-center text-center text-xs font-semibold border-l border-slate-300"
+                        :class="{ 'bg-red-500/5': d.isSun, 'bg-blue-500/5': d.isSat }"
+                        :style="{ width: ganttModel.dayWidth + 'px', flex: '1 0 ' + ganttModel.dayWidth + 'px' }"
+                      >
+                        <div class="g-day-title px-1 pt-1 pb-0.5 leading-tight whitespace-nowrap">
+                          {{ d.label }}<small class="font-normal text-slate-600 text-[10px] ml-0.5">({{ d.dow }})</small>
+                        </div>
+                        <div v-if="ganttModel.hourLabels.length" class="flex border-t border-slate-300 text-[10px] font-medium text-slate-600">
+                          <span
+                            v-for="(hl, idx) in ganttModel.hourLabels"
+                            :key="idx"
+                            class="flex-1 text-left px-0.5 py-0.5 whitespace-nowrap overflow-hidden"
+                            :class="{ 'border-l border-slate-200': idx > 0 }"
+                          >{{ hl }}</span>
+                        </div>
+                      </div>`,
+`                      <div
+                        v-for="d in ganttModel.days"
+                        :key="d.key"
+                        class="flex flex-col justify-center text-center text-xs font-semibold border-l border-slate-300"
+                        :class="{ 'bg-red-500/5': d.isSun, 'bg-blue-500/5': d.isSat }"
+                        :style="{ width: d.width + 'px', flex: d.width + ' 0 ' + d.width + 'px' }"
+                      >
+                        <div class="g-day-title px-1 pt-1 pb-0.5 leading-tight whitespace-nowrap overflow-hidden text-ellipsis">
+                          {{ d.label }}<small v-if="d.width >= 64" class="font-normal text-slate-600 text-[10px] ml-0.5">({{ d.dow }})</small>
+                        </div>
+                        <div v-if="d.hourLabels.length" class="flex border-t border-slate-300 text-[10px] font-medium text-slate-600">
+                          <span
+                            v-for="(hl, idx) in d.hourLabels"
+                            :key="idx"
+                            class="flex-1 text-left px-0.5 py-0.5 whitespace-nowrap overflow-hidden"
+                            :class="{ 'border-l border-slate-200': idx > 0 }"
+                          >{{ hl }}</span>
+                        </div>
+                      </div>`);
+replaceDashboard(`                      <div
+                        v-for="d in ganttModel.days"
+                        :key="d.key"
+                        class="flex border-l border-slate-300 h-full"
+                        :class="{ 'bg-red-500/5': d.isSun, 'bg-blue-500/5': d.isSat }"
+                        :style="{ width: ganttModel.dayWidth + 'px', flex: '1 0 ' + ganttModel.dayWidth + 'px' }"
+                      >
+                        <div
+                          v-for="idx in ganttModel.hourLabels.length"
+                          :key="idx"
+                          class="flex-1 h-full"
+                          :class="{ 'border-l border-dashed border-slate-300': idx > 1 }"
+                        ></div>
+                      </div>`,
+`                      <div
+                        v-for="d in ganttModel.days"
+                        :key="d.key"
+                        class="flex border-l border-slate-300 h-full"
+                        :class="{ 'bg-red-500/5': d.isSun, 'bg-blue-500/5': d.isSat }"
+                        :style="{ width: d.width + 'px', flex: d.width + ' 0 ' + d.width + 'px' }"
+                      >
+                        <div
+                          v-for="idx in d.hourLabels.length"
+                          :key="idx"
+                          class="flex-1 h-full"
+                          :class="{ 'border-l border-dashed border-slate-300': idx > 1 }"
+                        ></div>
+                      </div>`);
 writeFileSync(dashboardPath,dashboard);
 
 const scheduleAppPath=resolve(root,'js/change-schedule-app.js');
