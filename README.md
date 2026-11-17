@@ -258,3 +258,8 @@ Machine nodes and planned color/mold-change schedule tables now show `♨ 乾燥
 ## v0.2.38 — Correct incoming-mold 刻印確認
 
 On mold transitions, `刻印確認` now appears only if the **incoming** job's product name matches a configured stamp alias. A stamp found on the previous mold cannot cause an incorrect tag on a following unmarked mold. Same-mold `刻印替え` and event-only `乾燥` are unchanged. Machine node badges and 区分 tables use this rule. This release supersedes v0.2.37.
+
+
+## v0.2.39 — Near-realtime local next-change prediction
+
+Local machine nodes now show 次の変更 (型替え / 色替え / 品番替え), the next product/order, and 変更予測. The next change is found in the existing `data/schedule-local.json` using the current order from `data/machines.json`. Product-only changes are detected even when the mold/color remain the same. Forecasts use cycle × REALPICKQTY × remaining quantity only for running status 200/210 and recent machine samples. When a reliable forecast is unavailable, the node explicitly shows the scheduled start with 予定. Schedule update notifications from the local SSE stream bypass the short cache throttle. No new D1/Turso/Firebird requests are needed.
