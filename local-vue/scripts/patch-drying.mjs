@@ -86,6 +86,24 @@ export function patchDryingTemplate(root){
    '      productColorStyle,\n      extractDryingMold,\n      dayPills,','schedule setup');
   s=once(s,"          mold_name: r.mold_name || '',",
    "          mold_name: r.mold_name || '',\n          drying: Boolean(extractDryingMold(r,state.aliasCfg)),",'schedule events');
+
+  // Include assigned 乾燥 molds in the change schedule even with no change event.
+  s=once(s,'        if (!item.types.length) continue;\n        const r = item.r;',
+    '        const r = item.r;\n        const drying = Boolean(extractDryingMold(r,state.aliasCfg));\n        if (!item.types.length && !drying) continue;',
+    'drying-only rows');
+  s=once(s,"        const moldEvents = shiftEvents.filter((ev) => ev.types.includes('型替え') || ev.types.includes('刻印替え')).sort(byTime);",
+    "        const moldEvents = shiftEvents.filter((ev) => ev.types.includes('型替え') || ev.types.includes('刻印替え') || (ev.drying && !ev.types.length)).sort(byTime);",
+    'chronological drying-only events');
+  s=s.replaceAll('型替え・刻印替え予定はありません','型替え・刻印替え・乾燥予定はありません');
+  s=s.replaceAll('型替え・刻印替え一覧','型替え・刻印替え・乾燥一覧');
+  s=s.replaceAll('型替え・刻印替え {{ grp.moldEvents.length }}件','型替え・刻印替え・乾燥 {{ grp.moldEvents.length }}件');
+  s=once(s,'          cur: r.order_no === m.order_no,',
+    '          cur: r.order_no === m.order_no,\n          drying: Boolean(extractDryingMold(r,state.aliasCfg)),',
+    'modal rows');
+  s=once(s,'                      {{ row.r.mold_name }}',
+    '                      {{ row.r.mold_name }} <span v-if="row.drying" class="inline-block px-1.5 rounded border border-orange-400 bg-orange-100 text-orange-900 font-bold">♨ 乾燥</span>',
+    'modal tag');
+
   const eventTag='<change-tags :types="ev.types" :small="true" />';
   if(!s.includes(eventTag))throw Error('Schedule change tags missing');
   s=s.replaceAll(eventTag,eventTag+'<span v-if="ev.drying" class="rounded px-1 bg-orange-100 border border-orange-400 text-orange-900 text-[11px] font-bold">♨ 乾燥</span>');

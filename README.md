@@ -228,3 +228,8 @@ For targeted admin sync, Cloudflare queues one command per online mics-only agen
 ## v0.2.32 — Alias + Status Color D1 → local
 
 Both `change-aliases.json` and `status-colors.json` are fetched from authenticated Cloudflare D1 endpoints and validated before updating local files. The existing Settings button and Admin per-agent command download both files in one operation, acknowledging only after the two files were successfully saved. The local status color frontend reads `/data/status-colors.json` from the EXE and no longer uses browser localStorage for status colors. Local alias and status-color writes are disabled. Old local data is retained when either remote fetch fails.
+
+
+## v0.2.33 — 乾燥 and stamp transitions in the local change schedule
+
+The change schedule now includes drying-assigned mold rows even without color/mold/stamp changes, showing the persistent ♨ 乾燥 badge in daily/weekly grids, chronological list and machine modal. It does not generate false 型替え or 色替え events. Stamp-only transitions on the same mold show 刻印替え; a mold switch involving a stamp shows 刻印確認. This is presentation logic; D1 alias/status sync remains one-way.

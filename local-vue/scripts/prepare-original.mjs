@@ -340,4 +340,7 @@ writeFileSync(resolve(root,'tailwind-input.css'),'@tailwind base;\n@tailwind com
 // Reuse the same 乾燥 mold aliases and tags as Machine-Control online.
 const {patchDryingTemplate}=await import('./patch-drying.mjs');
 patchDryingTemplate(root);
+// Keep 刻印替え only for same-mold stamp changes and use 刻印確認 for mold changes.
+const {patchStampChanges}=await import('./patch-stamp-change.mjs');
+patchStampChanges(root);
 console.log('Prepared '+count+' original MICS Vue assets for local JSON and offline bundling');
