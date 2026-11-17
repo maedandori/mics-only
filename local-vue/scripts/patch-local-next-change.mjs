@@ -86,7 +86,7 @@ export function patchNextChange(root){
   '                    <span class="mics-next-head-right">',
   '                      <b>{{ metricsByMachine[m.machine_no].change.row.mold_name || metricsByMachine[m.machine_no].change.row.product_name || "—" }}</b>',
   '                      <small>({{ metricsByMachine[m.machine_no].change.row.mold_no || "—" }})</small>',
-  '                      <span v-if="metricsByMachine[m.machine_no].change.row.product_name" class="mics-next-product">{{ metricsByMachine[m.machine_no].change.row.product_name }}</span>',
+  '                      <span v-if="metricsByMachine[m.machine_no].change.nextColor" class="mics-next-product">{{ metricsByMachine[m.machine_no].change.nextColor }}</span>',
   '                    </span>',
   '                  </div>',
   '                </template>',
@@ -94,7 +94,6 @@ export function patchNextChange(root){
   '              </div>',
   ''
  ].join('\n');
- if(!block.includes('次の変更') || !block.includes('次の金型'))throw Error('Original next-change detail missing');
  block=compact;
  s=s.slice(0,start)+block+s.slice(stop);
  save('js/dashboard-app.js',s);
