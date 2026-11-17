@@ -24,7 +24,7 @@ export function patchLocalJsonLive(root){
     s=once(s,'loadData, loadFromFile,','loadData, loadFromFile, refreshLocalSchedule,','dashboard import schedule refresh');
    }
    s=once(s,'    let refreshTimer = null;',
-    '    let refreshTimer = null;\n    let liveJsonStream = null;\n    let liveJsonConnected = false;',
+    '    let refreshTimer = null;\n    let liveJsonStream = null;\n    let liveJsonConnected = false;\n    let jsonVersionTimer = null;\n    let knownJsonVersions = null;\n    let versionRequestBusy = false;',
     'SSE connection state');
    // The polling interval remains a fallback only, while the SSE is unavailable.
    s=once(s,'if (data.live) refreshTimer = setInterval(() => load(), 60000);',
@@ -52,19 +52,48 @@ export function patchLocalJsonLive(root){
     '    }',
    ];
    const shared=[
+    '    function ensureLocalFallback() {',
+    '      if (!refreshTimer) refreshTimer=setInterval(()=>void load(),15000);',
+    '    }',
+    '    async function checkLocalJsonVersions() {',
+    '      if (versionRequestBusy) return;',
+    '      versionRequestBusy=true;',
+    '      try {',
+    "        const response=await fetch('/api/json-versions',{cache:'no-store'});",
+    "        if (!response.ok) throw Error('JSON version status HTTP '+response.status);",
+    '        const next=await response.json();',
+    "        if (!next?.ok) throw Error('Local JSON version status unavailable');",
+    '        const previous=knownJsonVersions;',
+    '        knownJsonVersions=next;',
+    '        if(previous){',
+    "          if(next.machines!==previous.machines)onLocalJsonEvent({data:'{\"kind\":\"machines\"}'});",
+    "          if(next.schedule!==previous.schedule)onLocalJsonEvent({data:'{\"kind\":\"schedule\"}'});",
+    "          if(next.aliases!==previous.aliases||next.colors!==previous.colors)onLocalJsonEvent({data:'{\"kind\":\"settings\"}'});",
+    '        }',
+    '      } catch(err) {',
+    '        // A missing SSE/version endpoint must never freeze a local dashboard.',
+    '        if(!liveJsonConnected)ensureLocalFallback();',
+    '        else if(!refreshTimer)refreshTimer=setInterval(()=>void load(),20000);',
+    '      } finally { versionRequestBusy=false; }',
+    '    }',
     '    function startLocalJsonLive() {',
-    "      if (typeof EventSource!=='function') return;",
-    "      // Headless DOM smoke test checks rendering separately from SSE streaming.",
     "      if (new URLSearchParams(location.search).has('ci-smoke')) return;",
+    "      // Independent metadata watchdog: GETs only this PC, never D1/Turso.",
+    '      jsonVersionTimer=setInterval(()=>void checkLocalJsonVersions(),8000);',
+    '      void checkLocalJsonVersions();',
+    "      if (typeof EventSource!=='function') {ensureLocalFallback();return;}",
     "      liveJsonStream=new EventSource('/api/live');",
     "      liveJsonStream.addEventListener('mics-json',onLocalJsonEvent);",
     '      liveJsonStream.onopen=()=>{',
     '        liveJsonConnected=true;',
     '        clearInterval(refreshTimer);refreshTimer=null;',
+    '        // Reconcile immediately after SSE reconnect, even if an event was lost.',
+    '        void load();',
+    '        void checkLocalJsonVersions();',
     '      };',
     '      liveJsonStream.onerror=()=>{',
     '        liveJsonConnected=false;',
-    '        if(!refreshTimer)refreshTimer=setInterval(()=>load(),60000);',
+    '        ensureLocalFallback();',
     '      };',
     '    }',
     '',
@@ -76,8 +105,19 @@ export function patchLocalJsonLive(root){
      '    onMounted(() => {\n      startLocalJsonLive();',
      'subscribe in mount');
    s=once(s,'    onUnmounted(() => {\n      clearInterval(refreshTimer);',
-     '    onUnmounted(() => {\n      liveJsonStream?.close();\n      liveJsonStream=null;\n      clearInterval(refreshTimer);',
+     '    onUnmounted(() => {\n      liveJsonStream?.close();\n      liveJsonStream=null;\n      clearInterval(jsonVersionTimer);jsonVersionTimer=null;\n      clearInterval(refreshTimer);',
      'SSE cleanup');
+   if(isDashboard){
+    // Never drop an update arriving while the initial machine JSON is loading.
+    s=once(s,
+      '    let loadBusy = false;\n    async function load(file = null) {\n      if (loadBusy) return;',
+      '    let loadBusy = false, loadQueued = false;\n    async function load(file = null) {\n      if (loadBusy) {loadQueued=true;return;}',
+      'busy reload queue');
+    s=once(s,
+      '      } finally { loadBusy = false; }\n    }',
+      '      } finally { loadBusy = false; if(loadQueued){loadQueued=false;queueMicrotask(()=>void load());} }\n    }',
+      'drain latest update');
+   }
    return s;
   });
  }
