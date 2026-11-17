@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 
-const base='www/vue-v0.2.40/js/'
+const base='www/vue-v'+JSON.parse(readFileSync('local-vue/package.json','utf8')).version+'/js/'
 const dashboard=readFileSync(base+'dashboard-app.js','utf8')
 const schedule=readFileSync(base+'change-schedule-app.js','utf8')
 const server=readFileSync('src/local_web.rs','utf8')

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 import {pathToFileURL} from 'node:url'
 
-const root='www/vue-v0.2.39/js/'
+const root='www/vue-v'+JSON.parse(readFileSync('local-vue/package.json','utf8')).version+'/js/'
 const common=await import(pathToFileURL(process.cwd()+'/'+root+'common.js').href)
 const dashboard=readFileSync(root+'dashboard-app.js','utf8')
 const start=dashboard.indexOf('function findNextChange(')
