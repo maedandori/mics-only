@@ -712,7 +712,7 @@ mod tests {
 // Verify file-signature based notifications work without reading the JSON body.
 #[cfg(test)]
 mod live_json_tests {
-    use super::json_file_signature;
+    use super::{json_file_signature,json_version};
     use std::{fs,time::Duration};
     #[test]
     fn notices_detect_atomic_json_replacement() {
