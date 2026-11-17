@@ -68,11 +68,57 @@ export function patchNextChange(root){
   '                    <b class="truncate min-w-0">{{ metricsByMachine[m.machine_no].change.row.order_no || "—" }} · {{ metricsByMachine[m.machine_no].change.row.product_name || "—" }}</b>',
   '                  </div>',
   ''].join('\n');
- block=once(block,'                </template>\n                <div v-else class=',extras+'                </template>\n                <div v-else class=','node display');
+ // Use a two-line compact next-change display, matching the online machine node.
+ // Keep the original change detection and ETA computation above unchanged.
+ const compact=[
+  '              <div class="sec-border border-t pt-1.5 mt-1.5 mics-next-compact">',
+  '                <template v-if="metricsByMachine[m.machine_no].change?.row">',
+  '                  <div class="mics-next-line">',
+  '                    <span class="mics-next-title">次の変更</span>',
+  '                    <span class="mics-next-head-right">',
+  '                      <span v-for="(type,idx) in (metricsByMachine[m.machine_no].change.types || [])" :key="idx" class="mics-next-tag" :class="type === \'型替え\' ? \'mold\' : \'color\'">{{ type }}</span>',
+  '                      <b class="mics-next-time">· {{ fmtDT(metricsByMachine[m.machine_no].changeAt || metricsByMachine[m.machine_no].change.row.start_at,true,false) }}</b>',
+  '                      <span v-if="metricsByMachine[m.machine_no].changeAt && metricsByMachine[m.machine_no].changeAt.getTime() > Date.now()" class="mics-next-remain">(あと{{ Math.floor((metricsByMachine[m.machine_no].changeAt.getTime()-Date.now())/3600000) }}時間{{ Math.floor(((metricsByMachine[m.machine_no].changeAt.getTime()-Date.now())%3600000)/60000) }}分)</span>',
+  '                    </span>',
+  '                  </div>',
+  '                  <div class="mics-next-line mics-next-detail">',
+  '                    <span class="mics-next-title">次の金型</span>',
+  '                    <span class="mics-next-head-right">',
+  '                      <b>{{ metricsByMachine[m.machine_no].change.row.mold_name || metricsByMachine[m.machine_no].change.row.product_name || "—" }}</b>',
+  '                      <small>({{ metricsByMachine[m.machine_no].change.row.mold_no || "—" }})</small>',
+  '                      <span v-if="metricsByMachine[m.machine_no].change.row.product_name" class="mics-next-product">{{ metricsByMachine[m.machine_no].change.row.product_name }}</span>',
+  '                    </span>',
+  '                  </div>',
+  '                </template>',
+  '                <div v-else class="mics-next-line"><span class="mics-next-title">次の変更</span><b>変更予定なし</b></div>',
+  '              </div>',
+  ''
+ ].join('\n');
+ if(!block.includes('次の変更') || !block.includes('次の金型'))throw Error('Original next-change detail missing');
+ block=compact;
  s=s.slice(0,start)+block+s.slice(stop);
  save('js/dashboard-app.js',s);
  let components=read('js/components.js');
  components=once(components,"t === '刻印確認' ? 'stamp-check' : 'color'","t === '刻印確認' ? 'stamp-check' : (t === '品番替え' ? 'product' : 'color')",'product badge');
  save('js/components.js',components);
  save('css/tailwind-custom.css',read('css/tailwind-custom.css')+'\n.chg.product,.g-chg.product{background:#fef3c7;color:#92400e;border:1px solid #fbbf24;}\n');
+
+ const compactCss=[
+  '.mics-next-compact{font-size:12px;line-height:1.4;}',
+  '.mics-next-line{display:flex;align-items:baseline;justify-content:space-between;gap:6px;min-width:0;}',
+  '.mics-next-detail{margin-top:4px;}',
+  '.mics-next-title{flex:0 0 auto;font-weight:500;color:#334155;}',
+  '.mics-next-head-right{display:flex;align-items:baseline;justify-content:flex-end;flex-wrap:wrap;gap:3px;min-width:0;text-align:right;}',
+  '.mics-next-head-right b{font-weight:800;overflow-wrap:anywhere;}',
+  '.mics-next-time{white-space:nowrap;color:#0f172a;}',
+  '.mics-next-remain{white-space:nowrap;color:#0f172a;font-size:10px;}',
+  '.mics-next-tag{display:inline-block;padding:1px 6px;border-radius:4px;background:#fbbf24;color:#111827;font-size:11px;font-weight:800;white-space:nowrap;}',
+  '.mics-next-tag.mold{background:#dc2626;color:white;}',
+  '.mics-next-product{display:inline-block;border:1px solid #f59e0b;color:#92400e;border-radius:4px;padding:1px 5px;background:#fff7ed;font-size:11px;}',
+  '.mics-next-detail small{font-size:10px;color:#475569;}',
+  '@media(max-width:480px){.mics-next-line{flex-wrap:wrap;}.mics-next-head-right{justify-content:flex-start;text-align:left;}}',
+  ''
+ ].join('\n');
+ save('css/tailwind-custom.css',read('css/tailwind-custom.css')+'\n'+compactCss);
+
 }
