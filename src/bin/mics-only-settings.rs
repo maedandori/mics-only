@@ -244,6 +244,7 @@ fn main() {
     let sql_home=home.clone();
     let sql_window_handle=sql_window.handle.clone();
     let _sql_handler=nwg::full_bind_event_handler(&sql_window_handle,{
+        let sql_window=sql_window.clone();
         let sql_input=sql_input.clone();let sql_output=sql_output.clone();
         let sql_run=sql_run.clone();let sql_export=sql_export.clone();
         move |event,_,handle|{
