@@ -466,9 +466,103 @@ fn test_connection(c:&Config)->Result<(),String>{
     println!("NOTE: Each PC MUST have its own unique agent_id in mics.ini.");
     Ok(())
 }
+
+fn sql_read_only(sql: &str) -> Result<String,String> {
+    let sql=sql.trim().trim_end_matches(';').trim();
+    if sql.is_empty() || sql.contains(';') {return Err("Only one SELECT statement is allowed".into())}
+    let upper=sql.to_ascii_uppercase();
+    if !(upper.starts_with("SELECT ") || upper.starts_with("SELECT\n") || upper.starts_with("WITH ")) {
+        return Err("Read-only SELECT/WITH queries only".into())
+    }
+    for word in [" INSERT "," UPDATE "," DELETE "," DROP "," ALTER "," CREATE "," EXECUTE "," MERGE "," GRANT "," REVOKE "," INTO "," FOR UPDATE"," UNION "] {
+        if format!(" {upper} ").contains(word) {return Err("Unsafe SQL keyword rejected".into())}
+    }
+    if sql.contains("--") || sql.contains("/*") {return Err("SQL comments are not supported".into())}
+    Ok(sql.to_string())
+}
+fn inspect_database(c:&Config, password:&str, sql:Option<&str>) -> Result<String,String> {
+    let mut b=rsfbclient::builder_pure_rust();
+    b.host(&c.host).port(c.port).db_name(&c.database).user(&c.user).pass(password);
+    b.with_transaction(|tr| tr.read_only().no_wait());
+    let mut db=b.connect().map_err(|e|e.to_string())?;
+    let export_dir=env::current_exe().map_err(|e|e.to_string())?
+        .parent().ok_or("Missing EXE directory")?.join("database-export");
+    fs::create_dir_all(&export_dir).map_err(|e|e.to_string())?;
+    let mut report=String::new();
+    let tables:Vec<String>=if let Some(statement)=sql {
+        // Wrap user SELECT in a row limit; only return text representation.
+        let checked=sql_read_only(statement)?;
+        let limited=format!("SELECT FIRST 10 * FROM ({checked}) Q");
+        let cols:Vec<(String,)> = db.query(
+            "SELECT TRIM(RF.RDB$FIELD_NAME) FROM RDB$RELATION_FIELDS RF WHERE RF.RDB$RELATION_NAME = 'SCHEDULE' ORDER BY RF.RDB$FIELD_POSITION", ()
+        ).unwrap_or_default();
+        let _=cols;
+        // Arbitrary projections are not safely decodable without runtime column typing.
+        // Use Firebird's SQL engine to validate the statement and report query errors.
+        let rows:Vec<(String,)> = db.query(&format!("SELECT FIRST 10 CAST(Q.ENTRYNO AS VARCHAR(255)) FROM ({checked}) Q"), ())
+            .map_err(|e|format!("Query needs an ENTRYNO column for preview: {e}"))?;
+        report=rows.into_iter().map(|r|r.0).collect::<Vec<_>>().join("\n");
+        let _=limited;
+        Vec::new()
+    } else {
+        let rows:Vec<(String,)>=db.query("SELECT TRIM(RDB$RELATION_NAME) FROM RDB$RELATIONS WHERE COALESCE(RDB$SYSTEM_FLAG,0)=0 AND RDB$VIEW_BLR IS NULL ORDER BY RDB$RELATION_NAME",())
+            .map_err(|e|e.to_string())?;
+        rows.into_iter().map(|r|r.0).collect()
+    };
+    let mut exported=0;
+    for table in tables {
+        if !table.bytes().all(|x|x.is_ascii_alphanumeric()||x==b'_') {continue}
+        let fields:Vec<(String,)> = db.query(
+            "SELECT TRIM(RF.RDB$FIELD_NAME) FROM RDB$RELATION_FIELDS RF WHERE TRIM(RF.RDB$RELATION_NAME)=? ORDER BY RF.RDB$FIELD_POSITION",
+            (&table,)
+        ).map_err(|e|e.to_string())?;
+        if fields.is_empty(){continue}
+        let mut names=Vec::new();let mut expr=Vec::new();
+        for (name,) in fields {
+            if !name.bytes().all(|x|x.is_ascii_alphanumeric()||x==b'_'){continue}
+            names.push(name.clone());
+            expr.push(format!("COALESCE(CAST(\"{name}\" AS VARCHAR(255)), '')"));
+        }
+        // rsfbclient supports tuples up to limited arity: export one column at a time.
+        let mut rows:Vec<Vec<String>>=Vec::new();
+        let mut failed=false;
+        for col in &expr {
+            let query=format!("SELECT FIRST 10 {col} FROM \"{table}\"");
+            match db.query::<(String,),_>(&query,()) {
+                Ok(values)=>{
+                    for (idx,(value,)) in values.into_iter().enumerate(){
+                        if rows.len()<=idx{rows.push(Vec::new())}
+                        rows[idx].push(value);
+                    }
+                },
+                Err(e)=>{report.push_str(&format!("{table}: column skipped ({e})\n"));failed=true;break}
+            }
+        }
+        if failed||rows.is_empty(){continue}
+        let csv_escape=|s:&str|format!("\"{}\"",s.replace('"',"\"\""));
+        let mut out=names.iter().map(|s|csv_escape(s)).collect::<Vec<_>>().join(",");
+        out.push('\n');
+        for row in rows {out.push_str(&row.iter().map(|s|csv_escape(s)).collect::<Vec<_>>().join(","));out.push('\n');}
+        fs::write(export_dir.join(format!("{table}.csv")),out).map_err(|e|e.to_string())?;
+        exported+=1;
+    }
+    if sql.is_none(){report.push_str(&format!("Exported {exported} tables to {}",export_dir.display()));}
+    Ok(report)
+}
+
 fn main() {
     let result = Config::load().and_then(|c| {
-        if env::args().any(|arg| arg == "--test-connection") {
+        if env::args().any(|arg|arg=="--sql-query") {
+            let file=env::args().skip_while(|x|x!="--sql-query").nth(1).ok_or("SQL file missing")?;
+            let sql=fs::read_to_string(file).map_err(|e|e.to_string())?;
+            #[cfg(windows)] let password=credentials::load().map_err(|e|e.to_string())?.db_password;
+            #[cfg(not(windows))] let password=secret("MICS_DB_PASSWORD")?;
+            println!("{}",inspect_database(&c,&password,Some(&sql))?);Ok(())
+        } else if env::args().any(|arg|arg=="--dump-tables") {
+            #[cfg(windows)] let password=credentials::load().map_err(|e|e.to_string())?.db_password;
+            #[cfg(not(windows))] let password=secret("MICS_DB_PASSWORD")?;
+            println!("{}",inspect_database(&c,&password,None)?);Ok(())
+        } else if env::args().any(|arg| arg == "--test-connection") {
             test_connection(&c)
         } else if env::args().any(|arg| arg == "--check-config") {
             println!("Configuration syntax OK; credentials/network not checked");
