@@ -78,7 +78,7 @@ export function patchNextChange(root){
   '                    <span class="mics-next-head-right">',
   '                      <span v-for="(type,idx) in (metricsByMachine[m.machine_no].change.types || [])" :key="idx" class="mics-next-tag" :class="type === \'型替え\' ? \'mold\' : \'color\'">{{ type }}</span>',
   '                      <b class="mics-next-time">· {{ fmtDT(metricsByMachine[m.machine_no].changeAt || metricsByMachine[m.machine_no].change.row.start_at,true,false) }}</b>',
-  '                      <span v-if="metricsByMachine[m.machine_no].changeAt && metricsByMachine[m.machine_no].changeAt.getTime() > Date.now()" class="mics-next-remain">(あと{{ Math.floor((metricsByMachine[m.machine_no].changeAt.getTime()-Date.now())/3600000) }}時間{{ Math.floor(((metricsByMachine[m.machine_no].changeAt.getTime()-Date.now())%3600000)/60000) }}分)</span>',
+   '                      <span class="mics-next-remain" :data-mics-target="metricsByMachine[m.machine_no].changeAt ? metricsByMachine[m.machine_no].changeAt.toISOString() : metricsByMachine[m.machine_no].change.row.start_at"></span>',
   '                    </span>',
   '                  </div>',
   '                  <div class="mics-next-line mics-next-detail">',
@@ -119,5 +119,10 @@ export function patchNextChange(root){
   ''
  ].join('\n');
  save('css/tailwind-custom.css',read('css/tailwind-custom.css')+'\n'+compactCss);
+  // Always show a live countdown for the forecast OR the scheduled time.
+  // Only the text node is updated: no dashboard rerender or remote requests.
+  save('js/next-change-countdown.js',"/* Local machine card countdown, independent of database and dashboard rendering. */\n(() => {\n  'use strict';\n  const selector = '.mics-next-remain[data-mics-target]';\n  function parseTarget(raw) {\n    if (!raw) return NaN;\n    let value = String(raw).trim();\n    // MICS schedule datetimes are Japan-local when they have no explicit offset.\n    if (/^\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}[ T]\\d{1,2}:\\d{2}/.test(value)) {\n      value = value.replace(/\\//g, '-').replace(' ', 'T');\n      if (!/(?:Z|[+-]\\d{2}:?\\d{2})$/i.test(value)) value += '+09:00';\n    }\n    return Date.parse(value);\n  }\n  function updateCountdowns() {\n    const now = Date.now();\n    for (const element of document.querySelectorAll(selector)) {\n      const target = parseTarget(element.getAttribute('data-mics-target'));\n      const minutes = Number.isFinite(target) ? Math.ceil((target - now) / 60000) : NaN;\n      const label = !Number.isFinite(minutes) ? ''\n        : minutes <= 0 ? '(予定時刻経過)'\n        : '(あと' + Math.floor(minutes / 60) + '時間' + (minutes % 60) + '分)';\n      if (element.textContent !== label) element.textContent = label;\n    }\n  }\n  function init() {\n    updateCountdowns();\n    const root = document.getElementById('app');\n    if (root && typeof MutationObserver === 'function') {\n      // Refresh new cards after native JS dashboard re-renders. Ignore our text changes.\n      const observer = new MutationObserver(records => {\n        const cardsAdded = records.some(record => Array.from(record.addedNodes).some(node =>\n          node.nodeType === 1 && (node.matches?.(selector) || node.querySelector?.(selector))));\n        if (cardsAdded) updateCountdowns();\n      });\n      observer.observe(root, {childList: true, subtree: true});\n    }\n    // Text-only update: no full dashboard re-render and no HTTP/database requests.\n    setInterval(updateCountdowns, 10000);\n    document.addEventListener('visibilitychange', () => {\n      if (!document.hidden) updateCountdowns();\n    });\n  }\n  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, {once: true});\n  else init();\n})();");
+  const html=read('index.html');
+  save('index.html',once(html,'</body>','<script src="js/next-change-countdown.js" defer></script>\n</body>','countdown loader'));
 
 }

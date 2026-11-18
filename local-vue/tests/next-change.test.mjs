@@ -1,4 +1,5 @@
 import test from 'node:test'
+import {runInNewContext} from 'node:vm'
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 import {pathToFileURL} from 'node:url'
@@ -52,4 +53,28 @@ test('node shows change type, predicted/scheduled time, next product, and reuses
  assert.ok(dashboard.includes('refreshLocalSchedule(true)'))
  assert.ok(dashboard.includes("m.qty_remaining!=null"))
  assert.ok(!dashboard.includes("fetch('/api/mics/machines'"))
+})
+
+test('machine cards count down every minute in JST using predicted or scheduled time',()=>{
+ const js=readFileSync(root+'next-change-countdown.js','utf8')
+ assert.match(dashboard,/data-mics-target=.*change\.row\.start_at/)
+ assert.doesNotMatch(js,/\bfetch\s*\(/)
+ let now=Date.parse('2026-11-18T11:44:00+09:00')
+ class Clock extends Date { static now(){return now} }
+ const scheduled={textContent:'',getAttribute:()=> '2026/11/19 00:24'}
+ const predicted={textContent:'',getAttribute:()=> '2026-11-19T00:24:00+09:00'}
+ const intervals=[]
+ const document={
+  readyState:'complete',hidden:false,
+  querySelectorAll:()=>[scheduled,predicted],
+  getElementById:()=>null,addEventListener:()=>{}
+ }
+ runInNewContext(js,{Date:Clock,document,setInterval:fn=>intervals.push(fn)})
+ assert.equal(intervals.length,1)
+ assert.equal(scheduled.textContent,'(あと12時間40分)')
+ assert.equal(predicted.textContent,'(あと12時間40分)')
+ now+=60_000;intervals[0]()
+ assert.equal(scheduled.textContent,'(あと12時間39分)')
+ now=Date.parse('2026-11-19T00:25:00+09:00');intervals[0]()
+ assert.equal(scheduled.textContent,'(予定時刻経過)')
 })
