@@ -510,39 +510,40 @@ fn inspect_database(c:&Config, password:&str, sql:Option<&str>) -> Result<String
         rows.into_iter().map(|r|r.0).collect()
     };
     let mut exported=0;
+    let format_value = |val: rsfbclient::SqlType| -> String {
+        match val {
+            rsfbclient::SqlType::Text(t) => t,
+            rsfbclient::SqlType::Integer(i) => i.to_string(),
+            rsfbclient::SqlType::Int128(i) => i.to_string(),
+            rsfbclient::SqlType::Floating(f) => f.to_string(),
+            rsfbclient::SqlType::Timestamp(ts) => ts.to_string(),
+            rsfbclient::SqlType::Boolean(b) => b.to_string(),
+            rsfbclient::SqlType::Binary(bytes) => String::from_utf8(bytes)
+                .unwrap_or_else(|e| format!("<BLOB: {} bytes>", e.into_bytes().len())),
+            rsfbclient::SqlType::Null => String::new(),
+        }
+    };
+    let csv_escape=|s:&str|format!("\"{}\"",s.replace('"',"\"\""));
     for table in tables {
         if !table.bytes().all(|x|x.is_ascii_alphanumeric()||x==b'_') {continue}
-        let fields:Vec<(String,)> = db.query(
-            "SELECT TRIM(RF.RDB$FIELD_NAME) FROM RDB$RELATION_FIELDS RF WHERE TRIM(RF.RDB$RELATION_NAME)=? ORDER BY RF.RDB$FIELD_POSITION",
-            (&table,)
-        ).map_err(|e|e.to_string())?;
-        if fields.is_empty(){continue}
-        let mut names=Vec::new();let mut expr=Vec::new();
-        for (name,) in fields {
-            if !name.bytes().all(|x|x.is_ascii_alphanumeric()||x==b'_'){continue}
-            names.push(name.clone());
-            expr.push(format!("COALESCE(CAST(\"{name}\" AS VARCHAR(255)), '')"));
-        }
-        // rsfbclient supports tuples up to limited arity: export one column at a time.
-        let mut rows:Vec<Vec<String>>=Vec::new();
-        let mut failed=false;
-        for col in &expr {
-            let query=format!("SELECT FIRST 10 {col} FROM \"{table}\"");
-            match db.query::<(),(String,)>(&query,()) {
-                Ok(values)=>{
-                    for (idx,(value,)) in values.into_iter().enumerate(){
-                        if rows.len()<=idx{rows.push(Vec::new())}
-                        rows[idx].push(value);
-                    }
-                },
-                Err(e)=>{report.push_str(&format!("{table}: column skipped ({e})\n"));failed=true;break}
-            }
-        }
-        if failed||rows.is_empty(){continue}
-        let csv_escape=|s:&str|format!("\"{}\"",s.replace('"',"\"\""));
-        let mut out=names.iter().map(|s|csv_escape(s)).collect::<Vec<_>>().join(",");
+        // Query all columns together in one statement so rows stay aligned and
+        // non-string/BLOB/long columns are decoded without VARCHAR(255) truncation.
+        let query=format!("SELECT FIRST 10 * FROM \"{table}\"");
+        let rows:Vec<rsfbclient::Row>=match db.query(&query,()) {
+            Ok(r)=>r,
+            Err(e)=>{report.push_str(&format!("{table}: skipped ({e})\n"));continue}
+        };
+        if rows.is_empty(){continue}
+        let names:Vec<String>=rows[0].cols.iter().map(|c|c.name.to_string()).collect();
+        // Prepend UTF-8 BOM so Excel on Windows opens Japanese/Vietnamese CSVs with correct encoding.
+        let mut out=String::from("\u{FEFF}");
+        out.push_str(&names.iter().map(|s|csv_escape(s)).collect::<Vec<_>>().join(","));
         out.push('\n');
-        for row in rows {out.push_str(&row.iter().map(|s|csv_escape(s)).collect::<Vec<_>>().join(","));out.push('\n');}
+        for row in rows {
+            let line=row.cols.into_iter().map(|c|csv_escape(&format_value(c.value))).collect::<Vec<_>>().join(",");
+            out.push_str(&line);
+            out.push('\n');
+        }
         fs::write(export_dir.join(format!("{table}.csv")),out).map_err(|e|e.to_string())?;
         exported+=1;
     }
