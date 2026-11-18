@@ -528,7 +528,7 @@ fn inspect_database(c:&Config, password:&str, sql:Option<&str>) -> Result<String
         let mut failed=false;
         for col in &expr {
             let query=format!("SELECT FIRST 10 {col} FROM \"{table}\"");
-            match db.query::<(String,),_>(&query,()) {
+            match db.query::<(),(String,)>(&query,()) {
                 Ok(values)=>{
                     for (idx,(value,)) in values.into_iter().enumerate(){
                         if rows.len()<=idx{rows.push(Vec::new())}
