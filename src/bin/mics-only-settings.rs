@@ -36,6 +36,29 @@ fn main() {
         .title("MICS Only Settings / MICS 予備機設定")
         .build(&mut window).expect("Window error");
 
+    let mut tab_main=nwg::Button::default();
+    nwg::Button::builder().text("一般設定").parent(&window).position((25,880)).size((140,28)).build(&mut tab_main).unwrap();
+    let mut tab_sql=nwg::Button::default();
+    nwg::Button::builder().text("SQL / DB調査").parent(&window).position((175,880)).size((160,28)).build(&mut tab_sql).unwrap();
+    let mut sql_window=nwg::Window::default();
+    nwg::Window::builder().size((790,570)).position((230,110)).title("SQL / DB調査 (Read Only)")
+        .flags(nwg::WindowFlags::WINDOW).build(&mut sql_window).unwrap();
+    let mut sql_label=nwg::Label::default();
+    nwg::Label::builder().text("SELECT only - max 10 rows. Database is read-only.").parent(&sql_window)
+        .position((20,15)).size((720,25)).build(&mut sql_label).unwrap();
+    let mut sql_input=nwg::TextBox::default();
+    nwg::TextBox::builder().text("SELECT FIRST 10 * FROM PARTS").parent(&sql_window)
+        .position((20,45)).size((740,110)).build(&mut sql_input).unwrap();
+    let mut sql_run=nwg::Button::default();
+    nwg::Button::builder().text("SQL実行 / Chạy SQL").parent(&sql_window)
+        .position((20,170)).size((230,36)).build(&mut sql_run).unwrap();
+    let mut sql_export=nwg::Button::default();
+    nwg::Button::builder().text("全テーブル保存 / Lưu 10 dòng").parent(&sql_window)
+        .position((270,170)).size((260,36)).build(&mut sql_export).unwrap();
+    let mut sql_output=nwg::TextBox::default();
+    nwg::TextBox::builder().text("Results and export status will appear here.")
+        .parent(&sql_window).position((20,220)).size((740,290)).readonly(true)
+        .build(&mut sql_output).unwrap();
     let mut heading=nwg::Label::default();
     nwg::Label::builder().text("MICS Only | BACKUP Firebird Reader").parent(&window)
         .position((24,15)).size((380,30)).build(&mut heading).unwrap();
@@ -212,7 +235,40 @@ fn main() {
     let state=Rc::new(RefCell::new(false));
     let state2=state.clone();
 
+    let sql_input=Rc::new(sql_input);
+    let sql_output=Rc::new(sql_output);
+    let sql_run=Rc::new(sql_run);
+    let sql_export=Rc::new(sql_export);
+    let sql_window=Rc::new(sql_window);
+    let sql_agent=home.join("mics-only.exe");
+    let sql_home=home.clone();
+    let sql_window_handle=sql_window.handle.clone();
+    let _sql_handler=nwg::full_bind_event_handler(&sql_window_handle,{
+        let sql_input=sql_input.clone();let sql_output=sql_output.clone();
+        let sql_run=sql_run.clone();let sql_export=sql_export.clone();
+        move |event,_,handle|{
+            if event==nwg::Event::OnWindowClose {sql_window.set_visible(false);return}
+            if event!=nwg::Event::OnButtonClick{return}
+            if handle!=sql_run.handle && handle!=sql_export.handle{return}
+            let query=handle==sql_run.handle;
+            let path=sql_home.join("sql-inspector-query.sql");
+            if query {
+                if let Err(e)=fs::write(&path,sql_input.text()){
+                    sql_output.set_text(&format!("Cannot save query: {e}"));return
+                }
+            }
+            let mut cmd=Command::new(&sql_agent);
+            if query {cmd.arg("--sql-query").arg(&path);}else{cmd.arg("--dump-tables");}
+            let output=cmd.creation_flags(0x08000000).output();
+            match output {
+                Ok(out)=>sql_output.set_text(&format!("{}\n{}",String::from_utf8_lossy(&out.stdout),String::from_utf8_lossy(&out.stderr))),
+                Err(e)=>sql_output.set_text(&format!("Failed to launch agent: {e}"))
+            }
+        }
+    });
     let _handler=nwg::full_bind_event_handler(&window.handle,{
+        let sql_window=sql_window.clone();
+        let tab_sql_handle=tab_sql.handle.clone();
         let fields=fields.clone();
         let display_name=display_name.clone();
         let secret_fields=secret_fields.clone();
@@ -276,6 +332,7 @@ fn main() {
                 return
             }
             if event!=nwg::Event::OnButtonClick {return}
+            if handle==tab_sql_handle {sql_window.set_visible(true);return}
             if handle==close.handle {nwg::stop_thread_dispatch();return}
             if handle==open_web.handle {
                 let _=Command::new("explorer.exe").arg("http://127.0.0.1:8787")
@@ -453,7 +510,7 @@ fn main() {
         }
     });
     // Keep window-owned controls alive for the duration of the event loop.
-    let _controls=(heading,version_label,labels,secret_labels,note,status,test,open_web,start_agent,stop_agent,restart_agent,update_agent,alias_sync,alias_label,alias_notice,save,close,enable,autostart,state,update_notice,update_text,update_bar);
+    let _controls=(tab_main,tab_sql,sql_label,sql_input,sql_run,sql_export,sql_output,sql_window,sql_window_handle,_sql_handler,heading,version_label,labels,secret_labels,note,status,test,open_web,start_agent,stop_agent,restart_agent,update_agent,alias_sync,alias_label,alias_notice,save,close,enable,autostart,state,update_notice,update_text,update_bar);
     nwg::dispatch_thread_events();
 }
 #[cfg(not(windows))]
