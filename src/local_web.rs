@@ -12,6 +12,9 @@ pub struct LocalState {
     pub data_path: PathBuf,
     pub sync_status: Arc<Mutex<String>>,
     pub last_sync_at: Arc<Mutex<Option<String>>>,
+    // Agent-scheduled scan clock; independent of whether snapshot contents changed.
+    pub poll_interval_seconds: Arc<Mutex<Option<u64>>>,
+    pub next_poll_at: Arc<Mutex<Option<String>>>,
     pub alias_cloud: Arc<Mutex<Option<(String,String)>>>,
     pub alias_last_check: Arc<Mutex<Option<Instant>>>,
     pub alias_sync_status: Arc<Mutex<String>>,
@@ -48,6 +51,7 @@ impl LocalState {
             .unwrap_or_else(||json!({"source":"mics-only","machines":[],"sampled_at":null}));
         Self{snapshot:Arc::new(Mutex::new(initial)),mode:Arc::new(Mutex::new("STANDBY".into())),
             sync_status:Arc::new(Mutex::new("NOT_SYNCED".into())),last_sync_at:Arc::new(Mutex::new(None)),
+            poll_interval_seconds:Arc::new(Mutex::new(None)),next_poll_at:Arc::new(Mutex::new(None)),
             alias_cloud:Arc::new(Mutex::new(None)),alias_last_check:Arc::new(Mutex::new(None)),
             alias_sync_status:Arc::new(Mutex::new("NOT_CHECKED".into())),
             alias_last_sync_at:Arc::new(Mutex::new(None)),
@@ -64,6 +68,14 @@ impl LocalState {
                 *conn=Some((format!("{}/aliases",coordinator_url.trim_end_matches('/')),token.to_owned()));
             }
         }
+    }
+    pub fn set_poll_interval(&self, seconds:u64) {
+        if let Ok(mut value)=self.poll_interval_seconds.lock(){*value=Some(seconds);}
+    }
+    pub fn schedule_next_poll(&self, seconds:Option<u64>) {
+        // The clock reflects the next agent cycle, not the last changed JSON.
+        let next=seconds.map(|s|(chrono::Utc::now()+chrono::Duration::seconds(s as i64)).to_rfc3339());
+        if let Ok(mut value)=self.next_poll_at.lock(){*value=next;}
     }
     pub fn set_mode(&self,mode:&str) {
         if let Ok(mut m)=self.mode.lock(){*m=mode.to_owned()}
@@ -642,6 +654,8 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
                 "server":"127.0.0.1:8787",
                 "sync_status":state.sync_status.lock().map(|s|s.clone()).unwrap_or("UNKNOWN".into()),
                 "last_sync_at":state.last_sync_at.lock().ok().and_then(|v|v.clone()),
+                "poll_interval_seconds":state.poll_interval_seconds.lock().ok().and_then(|v|*v),
+                "next_poll_at":state.next_poll_at.lock().ok().and_then(|v|v.clone()),
                 "alias_sync_status":state.alias_sync_status.lock().map(|s|s.clone()).unwrap_or("UNKNOWN".into()),
                 "alias_last_sync_at":state.alias_last_sync_at.lock().ok().and_then(|v|v.clone())
             })).unwrap_or_default(),"no-store")

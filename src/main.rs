@@ -249,6 +249,7 @@ fn remote_update_request(response:&Value,local:&local_web::LocalState){
 fn run(c: Config) -> Result<(), String> {
     // Always serve the local dashboard, even when standby is disabled or lease denied.
     let local=local_web::LocalState::new(local_web::default_snapshot_path());
+    local.set_poll_interval(c.interval);
     // Alias settings use shared D1; local machine/schedule API remains entirely local.
     // The coordinator secret is read from DPAPI and never exposed to browser JS.
     #[cfg(windows)]
@@ -313,11 +314,15 @@ fn run(c: Config) -> Result<(), String> {
             }
             if last_mirror.elapsed()>=Duration::from_secs(300) {
                 last_mirror=std::time::Instant::now();
+                local.schedule_next_poll(None);
                 if valid_url&&!mirror_secret.is_empty(){
                     if let Err(e)=mirror::refresh(&c,&mirror_secret,&local){
                         eprintln!("MIRROR_ONLY_CACHE_ERROR {e}");
                     }
                 }
+                // Mirror-only snapshots are read at a separate, fixed 5-minute cadence.
+                // Do not claim the Settings interval controls this standby mode.
+                local.schedule_next_poll(if valid_url&&!mirror_secret.is_empty(){Some(300)}else{None});
             }
             thread::sleep(Duration::from_secs(60))
         }
@@ -341,6 +346,7 @@ fn run(c: Config) -> Result<(), String> {
     let mut schedule_polled_at:Option<std::time::Instant>=None;
     let mut last_presence:Option<std::time::Instant>=None;
     loop {
+        local.schedule_next_poll(None); // Current agent cycle is in progress.
         if last_presence.map(|t|t.elapsed()>=Duration::from_secs(60)).unwrap_or(true){
             if let Ok(response)=presence(&c,&coordinator_token,local.alias_sync_ack.lock().ok().and_then(|ack|*ack)){
                 remote_alias_sync_request(&response,&local);
@@ -416,6 +422,8 @@ fn run(c: Config) -> Result<(), String> {
             }
             Err(e) => { local.set_mode("OFFLINE"); previous_hash.clear(); eprintln!("{e}"); }
         }
+        // Schedule from the END of the work, matching the real sleep/cycle logic.
+        local.schedule_next_poll(Some(c.interval));
         thread::sleep(Duration::from_secs(c.interval));
     }
 }

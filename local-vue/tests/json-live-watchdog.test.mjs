@@ -65,3 +65,18 @@ test('version watchdog reacts to machine, schedule and settings modifications',a
  await api.check()
  assert.deepEqual(events,['machines','schedule','settings'])
 })
+
+test('header countdown uses the real agent cycle without DB requests',()=>{
+ const ui=readFileSync(base+'local-horizontal-tabs.js','utf8')
+ assert.ok(ui.includes('全機械の品番一覧</button><button type="button" id="mics-local-refresh"'))
+ assert.ok(ui.includes("fetch('/api/status',{cache:'no-store'})"))
+ assert.ok(ui.includes('Date.parse(refreshStatus?.next_poll_at'))
+ assert.ok(ui.includes('setInterval(renderRefreshClock,1000)'))
+ assert.ok(ui.includes("refreshButton.addEventListener('click',()=>location.reload())"))
+ assert.ok(server.includes('"poll_interval_seconds":state.poll_interval_seconds'))
+ assert.ok(server.includes('"next_poll_at":state.next_poll_at'))
+ const agent=readFileSync('src/main.rs','utf8')
+ assert.ok(agent.includes('local.set_poll_interval(c.interval)'))
+ assert.ok(agent.includes('local.schedule_next_poll(Some(c.interval))'))
+ assert.ok(agent.includes('local.schedule_next_poll(if valid_url&&!mirror_secret.is_empty(){Some(300)}else{None})'))
+})

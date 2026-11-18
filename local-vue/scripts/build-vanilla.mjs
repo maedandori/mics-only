@@ -80,10 +80,46 @@ const dashboard=location.pathname==='/'||location.pathname.endsWith('/index.html
 function titleText(node){return (node?.textContent||'').replace(/\\s+/g,' ').trim()}
 const nav=document.createElement('nav');
 nav.id='mics-local-tabs';nav.setAttribute('aria-label','画面切り替え');
-nav.innerHTML='<a data-page="dashboard" href="/">▦ ダッシュボード</a><a data-page="schedule" href="/change-schedule.html">▤ 型替え・色替え予定</a><button type="button" data-page="products">☷ 全機械の品番一覧</button>';
+nav.innerHTML='<a data-page="dashboard" href="/">▦ ダッシュボード</a><a data-page="schedule" href="/change-schedule.html">▤ 型替え・色替え予定</a><button type="button" data-page="products">☷ 全機械の品番一覧</button><button type="button" id="mics-local-refresh" title="クリックでローカル表示を再読込">データ更新: —</button>';
 document.body.prepend(nav);
 const dashboardLink=$('[data-page="dashboard"]',nav);
 const productButton=$('[data-page="products"]',nav);
+const refreshButton=$('#mics-local-refresh',nav);
+let refreshStatus=null,refreshStatusBusy=false;
+function renderRefreshClock(){
+  const mode=refreshStatus?.mode||'';
+  const at=Date.parse(refreshStatus?.next_poll_at||'');
+  const remaining=Number.isFinite(at)?Math.ceil((at-Date.now())/1000):NaN;
+  let label='待機中';
+  if(!refreshStatus)label='接続確認中';
+  else if((mode==='ACTIVE'||mode==='MIRROR_ONLY')&&Number.isFinite(remaining)){
+    if(remaining<=0)label='更新中…';
+    else {
+      const minutes=Math.floor(remaining/60),seconds=String(remaining%60).padStart(2,'0');
+      label=(minutes>=60?Math.floor(minutes/60)+'時間'+String(minutes%60).padStart(2,'0')+'分':String(minutes).padStart(2,'0')+':')+seconds+(minutes>=60?'秒':'');
+      if(mode==='MIRROR_ONLY')label='ミラー '+label;
+    }
+  }else if(mode==='ACTIVE')label='更新中…';
+  else if(mode==='OFFLINE')label='オフライン';
+  refreshButton.textContent='データ更新: '+label;
+  const interval=refreshStatus?.poll_interval_seconds;
+  refreshButton.title='クリック: ローカル画面を再読込（Firebirdの強制同期ではありません）'+(interval?' / MICS設定: '+interval+'秒':'')+(mode==='MIRROR_ONLY'?' / ミラーは約5分間隔':'');
+}
+async function readRefreshStatus(){
+  if(refreshStatusBusy)return;
+  refreshStatusBusy=true;
+  try{
+    const response=await fetch('/api/status',{cache:'no-store'});
+    if(!response.ok)throw Error('Local agent unavailable');
+    refreshStatus=await response.json();
+  }catch{refreshStatus=null}
+  finally{refreshStatusBusy=false;renderRefreshClock()}
+}
+refreshButton.addEventListener('click',()=>location.reload());
+setInterval(renderRefreshClock,1000);
+setInterval(()=>void readRefreshStatus(),15000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)void readRefreshStatus()});
+void readRefreshStatus();
 if(dashboard){dashboardLink.classList.add('selected')}
 else if(location.pathname.includes('change-schedule')){$('[data-page="schedule"]',nav).classList.add('selected')}
 const page=document.createElement('section');page.id='mics-products';page.hidden=true;
@@ -195,7 +231,7 @@ const chromeObserver=new MutationObserver(records=>{
 });
 chromeObserver.observe(document.body,{childList:true,subtree:true});
 })();`;
-const localTabsCSS="\n/* Compact horizontal menu – the existing upper-right card/list/calendar control is untouched. */\n#mics-local-tabs{position:sticky;top:0;z-index:100;display:flex!important;flex-wrap:wrap;gap:5px;align-items:center!important;min-height:48px;width:100%;box-sizing:border-box;padding:8px 12px;background:#fff;border-bottom:1px solid #dce3ef;font:600 13px/1.3 system-ui,\"Noto Sans JP\",sans-serif}\n#mics-local-tabs>[data-page]{display:inline-flex;align-items:center;text-decoration:none;color:#31445f;background:transparent;border:1px solid transparent;border-radius:7px;padding:9px 13px;font:inherit;cursor:pointer}\n#mics-local-tabs>[data-page].selected,#mics-local-tabs>[data-page]:hover{background:#eaf1ff;border-color:#b7cdfb;color:#1451cb}\nbody.mics-products-open> :not(#mics-local-tabs):not(#mics-products):not(script){display:none!important}\n#mics-products{padding:18px 14px 32px;background:#fff;min-height:80vh;color:#12233f;font:13px/1.5 system-ui,\"Noto Sans JP\",sans-serif}\n#mics-products[hidden]{display:none!important}\n.mics-products-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px}\n.mics-products-head h2{font-size:19px;font-weight:800;margin:0}.mics-products-head p{font-size:12px;color:#64748b;margin:2px 0}\n.mics-products-actions{display:flex;gap:8px;flex-wrap:wrap}\n.mics-products-actions input,.mics-products-actions select{border:1px solid #cbd5e1;border-radius:8px;padding:9px 11px;background:#fff;min-width:175px}\n.mics-products-actions input{min-width:min(320px,80vw)}\n.mics-products-scroll{overflow-x:auto;border:1px solid #cbd5e1;border-radius:10px}\n#mics-products table{border-collapse:collapse;width:100%;min-width:880px;text-align:left}\n#mics-products th{background:#eff4fa;font-weight:700;color:#45566e;font-size:12px;padding:10px;border-bottom:1px solid #cbd5e1}\n#mics-products td{padding:9px 10px;border-bottom:1px solid #e0e7f1;vertical-align:top}\n#mics-products tr:nth-child(even){background:#f7f9fc}\n#mics-products tr:hover td{background:#ebf2ff}\n#mics-products td small{display:block;font-size:11px;color:#64748b}\n#mics-products .mics-empty{text-align:center;padding:22px}\n#mics-local-view-modes{display:flex;align-items:center;justify-content:flex-end;margin-left:auto;flex:0 0 auto}\n#mics-local-view-modes>div{display:inline-flex;align-items:center}\n#mics-local-view-modes button{white-space:nowrap}\n[data-mics-old-toolbar=\"1\"],#app #menu-toggle,#app #status-chips,#app #search,#app #sort,#app section:has(#status-chips),#app section:has(#search){display:none!important}\n@media(max-width:750px){#mics-local-tabs{flex-wrap:wrap}#mics-local-view-modes{margin-left:auto}}\n@media(max-width:650px){#mics-local-tabs{padding:5px;gap:1px}#mics-local-tabs>[data-page]{padding:8px;font-size:11px}#mics-products{padding:10px 6px}}\n";
+const localTabsCSS="\n/* Compact horizontal menu – the existing upper-right card/list/calendar control is untouched. */\n#mics-local-tabs{position:sticky;top:0;z-index:100;display:flex!important;flex-wrap:wrap;gap:5px;align-items:center!important;min-height:48px;width:100%;box-sizing:border-box;padding:8px 12px;background:#fff;border-bottom:1px solid #dce3ef;font:600 13px/1.3 system-ui,\"Noto Sans JP\",sans-serif}\n#mics-local-tabs>[data-page]{display:inline-flex;align-items:center;text-decoration:none;color:#31445f;background:transparent;border:1px solid transparent;border-radius:7px;padding:9px 13px;font:inherit;cursor:pointer}\n#mics-local-tabs>[data-page].selected,#mics-local-tabs>[data-page]:hover{background:#eaf1ff;border-color:#b7cdfb;color:#1451cb}\n#mics-local-refresh{display:inline-flex;align-items:center;padding:8px 12px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;color:#1e40af;cursor:pointer;font:700 12px/1.3 system-ui,"Noto Sans JP",sans-serif;white-space:nowrap;font-variant-numeric:tabular-nums}\n#mics-local-refresh:hover{background:#dbeafe}\nbody.mics-products-open> :not(#mics-local-tabs):not(#mics-products):not(script){display:none!important}\n#mics-products{padding:18px 14px 32px;background:#fff;min-height:80vh;color:#12233f;font:13px/1.5 system-ui,\"Noto Sans JP\",sans-serif}\n#mics-products[hidden]{display:none!important}\n.mics-products-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px}\n.mics-products-head h2{font-size:19px;font-weight:800;margin:0}.mics-products-head p{font-size:12px;color:#64748b;margin:2px 0}\n.mics-products-actions{display:flex;gap:8px;flex-wrap:wrap}\n.mics-products-actions input,.mics-products-actions select{border:1px solid #cbd5e1;border-radius:8px;padding:9px 11px;background:#fff;min-width:175px}\n.mics-products-actions input{min-width:min(320px,80vw)}\n.mics-products-scroll{overflow-x:auto;border:1px solid #cbd5e1;border-radius:10px}\n#mics-products table{border-collapse:collapse;width:100%;min-width:880px;text-align:left}\n#mics-products th{background:#eff4fa;font-weight:700;color:#45566e;font-size:12px;padding:10px;border-bottom:1px solid #cbd5e1}\n#mics-products td{padding:9px 10px;border-bottom:1px solid #e0e7f1;vertical-align:top}\n#mics-products tr:nth-child(even){background:#f7f9fc}\n#mics-products tr:hover td{background:#ebf2ff}\n#mics-products td small{display:block;font-size:11px;color:#64748b}\n#mics-products .mics-empty{text-align:center;padding:22px}\n#mics-local-view-modes{display:flex;align-items:center;justify-content:flex-end;margin-left:auto;flex:0 0 auto}\n#mics-local-view-modes>div{display:inline-flex;align-items:center}\n#mics-local-view-modes button{white-space:nowrap}\n[data-mics-old-toolbar=\"1\"],#app #menu-toggle,#app #status-chips,#app #search,#app #sort,#app section:has(#status-chips),#app section:has(#search){display:none!important}\n@media(max-width:750px){#mics-local-tabs{flex-wrap:wrap}#mics-local-view-modes{margin-left:auto}}\n@media(max-width:650px){#mics-local-tabs{padding:5px;gap:1px}#mics-local-tabs>[data-page]{padding:8px;font-size:11px}#mics-products{padding:10px 6px}}\n";
 writeFileSync(join(output,'js','local-horizontal-tabs.js'),localTabsJS);
 writeFileSync(join(output,'css','local-horizontal-tabs.css'),localTabsCSS);
 execFileSync(process.execPath,['--check',join(output,'js','local-horizontal-tabs.js')],{stdio:'inherit'});
