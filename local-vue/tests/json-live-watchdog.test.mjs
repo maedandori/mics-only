@@ -97,7 +97,7 @@ test('material weight respects shot rounding and missing inputs',()=>{
 
 test('clicking any all-products cell opens details; keyboard activation works',()=>{
  const ui=readFileSync(base+'local-horizontal-tabs.js','utf8')
- assert.ok(ui.includes("e.target.closest('tr[data-mics-detail]')"))
+ assert.ok(ui.includes("target.closest('tr[data-mics-detail]')"))
  assert.ok(ui.includes("productRows.addEventListener('click'"))
  assert.ok(ui.includes("productRows.addEventListener('keydown'"))
  assert.ok(ui.includes("e.key!=='Enter'&&e.key!==' '"))
