@@ -33,7 +33,7 @@ fn read(host:&str,port:u16,db_name:&str,user:&str,password:&str,first:&str,end:&
   "SELECT TRIM(RDB$FIELD_NAME) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='SCHEDULE'",()
  ).map_err(|e|e.to_string())?;
  let known:BTreeSet<String>=fields.into_iter().map(|(f,)|f.to_ascii_uppercase()).collect();
- for field in ["MACHINENO","MACHINESEQ","MORDERNO","PARTSNAME","TOOLENTRYNO","MSTART","MEND","DELETEFLG"]{
+ for field in ["MACHINENO","MACHINESEQ","MORDERNO","PARTSNO","PARTSNAME","TOOLENTRYNO","MSTART","MEND","DELETEFLG"]{
   if !known.contains(field){return Err(format!("SCHEDULE missing {field}; keeping previous D1 snapshot"))}
  }
  let color=if known.contains("COLORNAME"){"S.COLORNAME"}else if known.contains("COLOR"){"S.COLOR"}else{"NULL"};
@@ -42,6 +42,7 @@ fn read(host:&str,port:u16,db_name:&str,user:&str,password:&str,first:&str,end:&
   COALESCE(TRIM(CAST(S.MACHINESEQ AS VARCHAR(30))),''), \
   COALESCE(TRIM(CAST(S.MORDERNO AS VARCHAR(60))),''), \
   COALESCE(TRIM(CAST(S.PARTSNAME AS VARCHAR(255))),''), \
+  COALESCE(TRIM(CAST(S.PARTSNO AS VARCHAR(80))),''), \
   COALESCE(TRIM(CAST(S.TOOLENTRYNO AS VARCHAR(60))),''), \
   COALESCE(TRIM(CAST(T.TOOLNO AS VARCHAR(100))),''), \
   COALESCE(TRIM(CAST(T.TOOLNAME AS VARCHAR(255))),''), \
@@ -52,17 +53,23 @@ fn read(host:&str,port:u16,db_name:&str,user:&str,password:&str,first:&str,end:&
   WHERE COALESCE(S.DELETEFLG,0)=0 AND S.MACHINENO IN (5,6,7,8,10,11,12,13,14,15,16,17,18,19) \
   AND S.MSTART < TIMESTAMP '{end}' AND (S.MEND >= TIMESTAMP '{first}' OR S.MSTART >= TIMESTAMP '{first}') \
   ORDER BY S.MACHINENO,S.MSTART,S.MACHINESEQ,S.MORDERNO");
- let rows:Vec<(String,String,String,String,String,String,String,String,String,String)>=db.query(&sql,()).map_err(|e|e.to_string())?;
+ let rows:Vec<(String,String,String,String,String,String,String,String,String,String,String)>=db.query(&sql,()).map_err(|e|e.to_string())?;
  if rows.len()>20000{return Err("Schedule exceeds local cache limit".into())}
  let mut out=Vec::new();
- for (machine,sequence,order,product,entry,mold_no,mold_name,color,start,end) in rows{
+ let materials=super::materials::schedule_material_names();
+ let mut mapped=0usize;
+ for (machine,sequence,order,product,parts_no,entry,mold_no,mold_name,color,start,end) in rows{
   let number=machine.parse::<i32>().map_err(|_|"Invalid machine number")?;
   if !MACHINES.contains(&number){return Err("Unexpected machine number".into())}
+  let material_names=materials.get(&parts_no).cloned().unwrap_or_default();
+  if !material_names.is_empty(){mapped+=1;}
   out.push(json!({"machine_no":number,"sequence":sequence,"order_no":order,
+   "parts_no":parts_no,"material_names":material_names,
    "product_name":product,"tool_entry_no":entry,"mold_no":mold_no,
    "mold_name":mold_name,"color":color,"start_at":normalize_time(&start)?,
    "end_at":if end.is_empty(){Value::Null}else{json!(normalize_time(&end)?)} }));
  }
+ println!("SCHEDULE_MATERIAL_MATCH matched={} total={}",mapped,out.len());
  Ok(out)
 }
 
