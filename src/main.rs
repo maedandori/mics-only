@@ -5,6 +5,7 @@ mod credentials;
 mod updater;
 mod local_web;
 mod schedule;
+mod materials;
 mod mirror;
 use chrono::{DateTime, Utc};
 use rsfbclient::prelude::*;
@@ -344,6 +345,7 @@ fn run(c: Config) -> Result<(), String> {
     let mut previous_hash = String::new();
     let mut last_mirror:Option<std::time::Instant>=None;
     let mut schedule_polled_at:Option<std::time::Instant>=None;
+    let mut materials_polled_at:Option<std::time::Instant>=None;
     let mut last_presence:Option<std::time::Instant>=None;
     loop {
         local.schedule_next_poll(None); // Current agent cycle is in progress.
@@ -358,6 +360,10 @@ fn run(c: Config) -> Result<(), String> {
         match acquire(&c, &coordinator_token) {
             Ok(Some(lease)) => {
                 local.set_mode("ACTIVE");
+                if materials_polled_at.map(|t|t.elapsed()>=Duration::from_secs(86400)).unwrap_or(true){
+                    materials_polled_at=Some(std::time::Instant::now());
+                    match materials::sync(&c,&db_password){Ok(n)=>println!("MATERIAL_SYNC_OK rows={n}"),Err(e)=>eprintln!("MATERIAL_SYNC_FAILED {e}")}
+                }
                 if schedule_polled_at.map(|t|t.elapsed()>=Duration::from_secs(60)).unwrap_or(true){
                     // A valid coordinator lease is required before opening Firebird
                     // even for the local-only schedule cache.
