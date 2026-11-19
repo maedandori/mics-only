@@ -123,12 +123,43 @@ void readRefreshStatus();
 if(dashboard){dashboardLink.classList.add('selected')}
 else if(location.pathname.includes('change-schedule')){$('[data-page="schedule"]',nav).classList.add('selected')}
 const page=document.createElement('section');page.id='mics-products';page.hidden=true;
-page.innerHTML='<div class="mics-products-head"><div><h2>全機械の品番一覧</h2><p id="mics-products-count">ローカルJSONを読み込み中</p></div><div class="mics-products-actions"><input id="mics-products-search" placeholder="受注番号・品名・金型・号機で検索…" aria-label="品番を検索"><select id="mics-products-sort" aria-label="並び替え"><option value="machine">号機順</option><option value="start">開始日時順</option><option value="order">受注番号順</option></select></div></div><div class="mics-products-scroll"><table><thead><tr><th>#</th><th>号機</th><th>受注番号</th><th>品名</th><th>原料</th><th>金型</th><th>開始</th><th>終了</th><th>時間</th></tr></thead><tbody id="mics-products-rows"></tbody></table></div>';
+page.innerHTML='<div class="mics-products-head"><div><h2>全機械の品番一覧</h2><p id="mics-products-count">ローカルJSONを読み込み中</p></div><div class="mics-products-actions"><input id="mics-products-search" placeholder="受注番号・品名・金型・号機で検索…" aria-label="品番を検索"><select id="mics-products-sort" aria-label="並び替え"><option value="machine">号機順</option><option value="start">開始日時順</option><option value="order">受注番号順</option></select></div></div><div class="mics-products-scroll"><table><thead><tr><th>#</th><th>号機</th><th>受注番号</th><th>品名</th><th>金型</th><th>開始</th><th>終了</th><th>時間</th></tr></thead><tbody id="mics-products-rows"></tbody></table></div>';
 document.body.append(page);
-let rows=[], showing=false, loading=false;
+let rows=[], showing=false, loading=false, visibleRows=[];
+const details=document.createElement('div');
+details.id='mics-products-detail';
+details.hidden=true;
+details.style.cssText='position:fixed;inset:0;z-index:15000;background:rgba(15,23,42,.75);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box';
+page.append(details);
+function closeDetails(){details.hidden=true;details.innerHTML='';}
+function showDetails(r){
+ const item=(label,value)=>'<dt style="font-weight:700;color:#64748b">'+esc(label)+'</dt><dd style="margin:0;overflow-wrap:anywhere">'+esc(value??'—')+'</dd>';
+ const names=Array.isArray(r.material_names)?r.material_names.filter(Boolean):[];
+ const materials=names.length?'<ul style="margin:0;padding-left:22px;overflow-wrap:anywhere">'+names.map(v=>'<li style="padding:4px 0">'+esc(v)+'</li>').join('')+'</ul>':'<p style="margin:0;color:#64748b">原料データがありません</p>';
+ details.innerHTML='<section role="dialog" aria-modal="true" aria-labelledby="mics-products-detail-title" style="box-sizing:border-box;width:100%;max-width:540px;max-height:calc(100dvh - 24px);overflow-y:auto;border-radius:14px;padding:18px;background:#fff;color:#0f172a;box-shadow:0 20px 60px rgba(0,0,0,.25)">'
+ +'<header style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px"><div><h2 id="mics-products-detail-title" style="margin:0 0 6px;font-size:19px">品番の詳細</h2><strong style="color:#1d4ed8;font-size:16px;overflow-wrap:anywhere">'+esc(r.parts_no||r.order_no||'—')+'</strong></div><button type="button" id="mics-products-close-detail" aria-label="閉じる" style="flex:none;border:1px solid #cbd5e1;border-radius:9px;padding:7px 13px;font-size:18px;background:#f1f5f9;color:#0f172a;cursor:pointer">×</button></header>'
+ +'<dl style="margin:0;display:grid;grid-template-columns:minmax(90px,34%) minmax(0,1fr);gap:9px 12px;font-size:14px">'
+ +item('号機',machineKey(r)+'号機')+item('品番',r.parts_no||'—')+item('受注番号',r.order_no||'—')
+ +item('品名',r.product_name||'—')+item('金型',[(r.mold_name||''),(r.mold_no||'')].filter(Boolean).join(' / ')||'—')
+ +item('色',r.color||'—')+item('開始',formatDate(r.start_at))+item('終了',formatDate(r.end_at))
+ +(r.qty_plan!=null?item('予定数',Number(r.qty_plan).toLocaleString('ja-JP')):'')+'</dl>'
+ +'<div style="margin-top:16px;border-top:1px solid #e2e8f0;padding-top:13px"><strong style="display:block;margin-bottom:8px">使用原料</strong>'+materials+'</div></section>';
+ details.hidden=false;
+ const close=$('#mics-products-close-detail',details);
+ close?.addEventListener('click',closeDetails);
+ close?.focus();
+}
+details.addEventListener('click',e=>{if(e.target===details)closeDetails()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!details.hidden)closeDetails()});
+$('#mics-products-rows',page).addEventListener('click',e=>{
+ const button=e.target.closest('button[data-mics-detail]');
+ if(!button)return;
+ const row=visibleRows[Number(button.dataset.micsDetail)];
+ if(row)showDetails(row);
+});
 function closeProducts(){
  if(!showing)return;
- showing=false;page.hidden=true;document.body.classList.remove('mics-products-open');
+ showing=false;page.hidden=true;closeDetails();document.body.classList.remove('mics-products-open');
  $$('[data-page]',nav).forEach(el=>el.classList.toggle('selected',dashboard?el.dataset.page==='dashboard':el.dataset.page==='schedule'));
 }
 function removeOldChrome(){
@@ -185,10 +216,11 @@ const duration=r=>{const a=parseDate(r.start_at),b=parseDate(r.end_at);if(!Numbe
 function render(){
  const q=$('#mics-products-search',page).value.normalize('NFKC').toLowerCase().trim();
  const sort=$('#mics-products-sort',page).value;
- const selected=rows.filter(r=>!q||[r.machine_no,r.order_no,r.product_name,r.mold_no,r.mold_name,r.color,(Array.isArray(r.material_names)?r.material_names.join(" "):"")].some(v=>String(v??'').normalize('NFKC').toLowerCase().includes(q)));
+ const selected=rows.filter(r=>!q||[r.machine_no,r.order_no,r.parts_no,r.product_name,r.mold_no,r.mold_name,r.color,(Array.isArray(r.material_names)?r.material_names.join(" "):"")].some(v=>String(v??'').normalize('NFKC').toLowerCase().includes(q)));
  selected.sort((a,b)=>sort==='start'?(parseDate(a.start_at)||0)-(parseDate(b.start_at)||0)||byOrder(machineKey(a))-byOrder(machineKey(b)):sort==='order'?String(a.order_no||'').localeCompare(String(b.order_no||''),'ja'):byOrder(machineKey(a))-byOrder(machineKey(b))||(parseDate(a.start_at)||0)-(parseDate(b.start_at)||0));
+ visibleRows=selected;
  $('#mics-products-count',page).textContent=selected.length+' 件 / 全'+rows.length+' 件 · ローカル保存データ';
- $('#mics-products-rows',page).innerHTML=selected.length?selected.map((r,i)=>'<tr><td>'+ (i+1) +'</td><td><b>'+esc(machineKey(r))+'号機</b></td><td>'+esc(r.order_no||'—')+'</td><td>'+esc(r.product_name||'—')+'</td><td>'+esc(Array.isArray(r.material_names)&&r.material_names.length?r.material_names.join(' / '):'—')+'</td><td><b>'+esc(r.mold_no||'—')+'</b><small>'+esc(r.mold_name||'')+'</small></td><td>'+esc(formatDate(r.start_at))+'</td><td>'+esc(formatDate(r.end_at))+'</td><td>'+esc(duration(r))+'</td></tr>').join(''):'<tr><td colspan="9" class="mics-empty">該当する品番はありません</td></tr>';
+ $('#mics-products-rows',page).innerHTML=selected.length?selected.map((r,i)=>'<tr><td>'+ (i+1) +'</td><td><b>'+esc(machineKey(r))+'号機</b></td><td><button type="button" data-mics-detail="'+i+'" aria-label="品番の詳細" style="background:none;border:0;padding:3px 0;color:#1d4ed8;text-decoration:underline;font:700 13px system-ui,sans-serif;text-align:left;cursor:pointer;overflow-wrap:anywhere">'+esc(r.order_no||r.parts_no||'詳細')+'</button></td><td>'+esc(r.product_name||'—')+'</td><td><b>'+esc(r.mold_no||'—')+'</b><small>'+esc(r.mold_name||'')+'</small></td><td>'+esc(formatDate(r.start_at))+'</td><td>'+esc(formatDate(r.end_at))+'</td><td>'+esc(duration(r))+'</td></tr>').join(''):'<tr><td colspan="8" class="mics-empty">該当する品番はありません</td></tr>';
 }
 async function load(){
  if(loading)return;loading=true;
