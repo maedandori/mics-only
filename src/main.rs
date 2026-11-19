@@ -362,7 +362,7 @@ fn run(c: Config) -> Result<(), String> {
                 local.set_mode("ACTIVE");
                 if materials_polled_at.map(|t|t.elapsed()>=Duration::from_secs(86400)).unwrap_or(true){
                     materials_polled_at=Some(std::time::Instant::now());
-                    match materials::sync(&c,&db_password){Ok(n)=>println!("MATERIAL_SYNC_OK rows={n}"),Err(e)=>eprintln!("MATERIAL_SYNC_FAILED {e}")}
+                    match materials::sync(&c,&db_password){Ok(n)=>{println!("MATERIAL_SYNC_OK rows={n}");match materials::upload(&c,&sync_token){Ok(sent)=>println!("MATERIAL_TURSO_SYNC_OK rows={sent}"),Err(e)=>eprintln!("MATERIAL_TURSO_SYNC_FAILED {e}")}},Err(e)=>eprintln!("MATERIAL_SYNC_FAILED {e}")}
                 }
                 if schedule_polled_at.map(|t|t.elapsed()>=Duration::from_secs(60)).unwrap_or(true){
                     // A valid coordinator lease is required before opening Firebird
