@@ -81,9 +81,9 @@ const dashboard=location.pathname==='/'||location.pathname.endsWith('/index.html
 function materialEstimate(qtyRaw,pickRaw,weightRaw){
  const qty=Number(qtyRaw),pick=Number(pickRaw),grams=Number(weightRaw);
  if(qtyRaw==null||pickRaw==null||weightRaw==null||String(qtyRaw).trim()===''||String(pickRaw).trim()===''||String(weightRaw).trim()==='')return null;
- if(!Number.isSafeInteger(qty)||qty<=0||!Number.isSafeInteger(pick)||pick<=0||!Number.isFinite(grams)||grams<=0)return null;
+ if(!Number.isSafeInteger(qty)||qty<0||!Number.isSafeInteger(pick)||pick<=0||!Number.isFinite(grams)||grams<=0)return null;
  const shots=Math.ceil(qty/pick),produced=shots*pick,totalKg=produced*grams/1000;
- if(!Number.isSafeInteger(produced)||!Number.isFinite(totalKg)||totalKg<=0)return null;
+ if(!Number.isSafeInteger(produced)||!Number.isFinite(totalKg)||totalKg<0)return null;
  return {qty,pick,grams,shots,produced,totalKg};
 }
 const formatKg=n=>Number(n).toLocaleString('ja-JP',{maximumFractionDigits:3})+' kg';
@@ -186,26 +186,27 @@ function showDetails(r){
  +(r.part_weight_raw!=null&&r.part_weight_raw!==''?item('WEIGHT (g/個、ランナー込み)',r.part_weight_raw):'')+'</dl>'
  +'<div style="margin-top:16px;border-top:1px solid #e2e8f0;padding-top:13px"><strong style="display:block;margin-bottom:8px">使用原料・配合率・必要重量</strong>'
  +'<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px">'
- +'<label style="font-size:12px;font-weight:700">予定数 (個)<input id="mics-material-plan-qty" type="number" min="1" step="1" inputmode="numeric" value="'+esc(r.qty_plan??'')+'" placeholder="数量を入力" style="display:block;box-sizing:border-box;width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px;margin-top:4px"></label>'
+ +'<label style="font-size:12px;font-weight:700">残数 (個)<input id="mics-material-remaining-qty" type="number" min="0" step="1" inputmode="numeric" value="'+esc(r.qty_remaining??'')+'" placeholder="残数を入力" style="display:block;box-sizing:border-box;width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px;margin-top:4px"></label>'
  +'<label style="font-size:12px;font-weight:700">取り数 (個/ショット)<input id="mics-material-pick-qty" type="number" min="1" step="1" inputmode="numeric" value="'+esc(r.pick_qty??'')+'" placeholder="取り数を入力" style="display:block;box-sizing:border-box;width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px;margin-top:4px"></label></div>'
- +'<div id="mics-material-calculation" aria-live="polite" style="padding:10px 12px;border-radius:8px;background:#eff6ff;color:#1e3a8a;font-size:13px;margin-bottom:8px"></div>'
- +(canCalc?'<small style="display:block;margin-bottom:12px;color:#64748b">WEIGHTはランナー込みの1個重量(g)。全ショット数を切り上げてkgを計算。配合率で原料別に按分した推定値です。</small>':'<p style="color:#64748b;margin-bottom:8px">配合比率データなし（合計重量は計算できます）</p>')
+ +(r.remaining_from_live?'<small style="display:block;color:#64748b;margin:-3px 0 10px">MICSの残数 = 予定数 − 良品数（編集可能）</small>':'')
+  +'<div id="mics-material-calculation" aria-live="polite" style="padding:10px 12px;border-radius:8px;background:#eff6ff;color:#1e3a8a;font-size:13px;margin-bottom:8px"></div>'
+ +(canCalc?'<small style="display:block;margin-bottom:12px;color:#64748b">残数から計算。WEIGHTはランナー込みの1個重量(g)。ショット数を切り上げてkgを算出。配合率で原料別に按分した推定値です。</small>':'<p style="color:#64748b;margin-bottom:8px">配合比率データなし（合計重量は計算できます）</p>')
  +materials+'</div></section>';
  details.hidden=false;
  details.style.display='flex';
- const planInput=$('#mics-material-plan-qty',details),pickInput=$('#mics-material-pick-qty',details);
+ const remainingInput=$('#mics-material-remaining-qty',details),pickInput=$('#mics-material-pick-qty',details);
  function updateEstimate(){
-  const result=materialEstimate(planInput?.value,pickInput?.value,r.part_weight_raw);
+  const result=materialEstimate(remainingInput?.value,pickInput?.value,r.part_weight_raw);
   const summary=$('#mics-material-calculation',details);
   if(summary)summary.textContent=result
-   ?'必要原料重量: '+formatKg(result.totalKg)+' / '+result.shots.toLocaleString('ja-JP')+' ショット × '+result.pick+' 個 = '+result.produced.toLocaleString('ja-JP')+' 個'+(result.produced>result.qty?' (予定数より '+(result.produced-result.qty)+' 個多く成形)':'')
-   :'必要重量: 計算不可（WEIGHT・予定数・取り数を確認してください）';
+   ?'必要原料重量: '+formatKg(result.totalKg)+' / '+result.shots.toLocaleString('ja-JP')+' ショット × '+result.pick+' 個 = '+result.produced.toLocaleString('ja-JP')+' 個'+(result.produced>result.qty?' (残数より '+(result.produced-result.qty)+' 個多く成形)':'')
+   :'必要重量: 計算不可（WEIGHT・残数・取り数を確認してください）';
   details.querySelectorAll('[data-mics-weight-pct]').forEach(node=>{
    const raw=node.dataset.micsWeightPct,pct=Number(raw);
    node.textContent=result&&canCalc&&raw!==''&&Number.isFinite(pct)?formatKg(result.totalKg*pct/100):'—';
   });
  }
- planInput?.addEventListener('input',updateEstimate);
+ remainingInput?.addEventListener('input',updateEstimate);
  pickInput?.addEventListener('input',updateEstimate);
  updateEstimate();
  const close=$('#mics-products-close-detail',details);
@@ -308,7 +309,7 @@ async function load(){
   const activeByOrder=new Map(active.filter(m=>m.order_no&&m.status_code!=='AMBIGUOUS').map(m=>[machineKey(m)+'|'+String(m.order_no),m]));
   rows=scheduled.map(r=>{
    const m=activeByOrder.get(machineKey(r)+'|'+String(r.order_no??''));
-   return m?{...r,qty_plan:m.qty_plan??r.qty_plan,pick_qty:m.pick_qty??r.pick_qty}:r;
+   return m?{...r,qty_plan:m.qty_plan??r.qty_plan,qty_remaining:m.qty_remaining??r.qty_remaining,pick_qty:m.pick_qty??r.pick_qty,remaining_from_live:m.qty_remaining!=null}:r;
   });
   for(const m of active)if(m.order_no&&!known.has(machineKey(m)+'|'+String(m.order_no)))rows.unshift({...m,start_at:m.start_at||m.started_at||'',end_at:m.end_at||m.scheduled_end_at||''});
   render();

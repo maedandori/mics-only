@@ -90,9 +90,13 @@ test('material weight respects shot rounding and missing inputs',()=>{
  assert.equal(estimate(10001,4,117).produced,10004)
  assert.equal(estimate(10001,4,117).totalKg,1170.468)
  assert.equal(estimate(10000,4,117).totalKg,1170)
- for(const args of [[0,4,117],[100,0,117],[100,2.5,117],['',4,117],[100,4,null]])assert.equal(estimate(...args),null)
+ assert.equal(estimate(0,4,117).totalKg,0)
+ for(const args of [[-1,4,117],[100,0,117],[100,2.5,117],['',4,117],[100,4,null]])assert.equal(estimate(...args),null)
  assert.ok(ui.includes('qty_plan:m.qty_plan??r.qty_plan'))
  assert.ok(ui.includes('pick_qty:m.pick_qty??r.pick_qty'))
+ assert.ok(ui.includes('qty_remaining:m.qty_remaining??r.qty_remaining'))
+ assert.ok(ui.includes('mics-material-remaining-qty'))
+ assert.ok(ui.includes('WEIGHT・残数・取り数を確認してください'))
 })
 
 test('clicking any all-products cell opens details; keyboard activation works',()=>{
@@ -105,4 +109,17 @@ test('clicking any all-products cell opens details; keyboard activation works',(
  assert.ok(!ui.includes('<button type="button" data-mics-detail='))
  const css=readFileSync('www/vue-v'+JSON.parse(readFileSync('local-vue/package.json','utf8')).version+'/css/local-horizontal-tabs.css','utf8')
  assert.ok(css.includes('#mics-products tr[data-mics-detail]:focus-visible'))
+})
+
+test('remaining quantity used for resin, not total plan',()=>{
+ const ui=readFileSync(base+'local-horizontal-tabs.js','utf8')
+ assert.ok(ui.includes("activeByOrder.get(machineKey(r)+'|'+String(r.order_no??''))"))
+ assert.ok(ui.includes('qty_remaining:m.qty_remaining??r.qty_remaining'))
+ assert.ok(ui.includes('remaining_from_live:m.qty_remaining!=null'))
+ assert.ok(!ui.includes('materialEstimate(planInput?.value'))
+ const a=ui.indexOf('function materialEstimate('),b=ui.indexOf('function titleText(',a)
+ const calculate=new Function(ui.slice(a,b)+'return materialEstimate')()
+ assert.equal(calculate(1001,4,117).totalKg,117.468)
+ assert.equal(calculate(0,4,117).totalKg,0)
+ assert.equal(calculate('',4,117),null)
 })
