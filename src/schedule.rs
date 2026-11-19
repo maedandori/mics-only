@@ -56,15 +56,19 @@ fn read(host:&str,port:u16,db_name:&str,user:&str,password:&str,first:&str,end:&
  let rows:Vec<(String,String,String,String,String,String,String,String,String,String,String)>=db.query(&sql,()).map_err(|e|e.to_string())?;
  if rows.len()>20000{return Err("Schedule exceeds local cache limit".into())}
  let mut out=Vec::new();
- let materials=super::materials::schedule_material_names();
+ let materials=super::materials::schedule_material_profiles();
  let mut mapped=0usize;
  for (machine,sequence,order,product,parts_no,entry,mold_no,mold_name,color,start,end) in rows{
   let number=machine.parse::<i32>().map_err(|_|"Invalid machine number")?;
   if !MACHINES.contains(&number){return Err("Unexpected machine number".into())}
-  let material_names=materials.get(&parts_no).cloned().unwrap_or_default();
+  let profile=materials.get(&parts_no);
+  let material_names=profile.map(|p|p.details.iter().map(|d|d.name.clone()).collect::<Vec<_>>()).unwrap_or_default();
+  let material_details=profile.map(|p|p.details.iter().map(|d|json!({"name":d.name,"percentage":d.percentage})).collect::<Vec<_>>()).unwrap_or_default();
+  let part_weight_raw=profile.and_then(|p|p.part_weight_raw.clone());
   if !material_names.is_empty(){mapped+=1;}
   out.push(json!({"machine_no":number,"sequence":sequence,"order_no":order,
    "parts_no":parts_no,"material_names":material_names,
+   "material_details":material_details,"part_weight_raw":part_weight_raw,
    "product_name":product,"tool_entry_no":entry,"mold_no":mold_no,
    "mold_name":mold_name,"color":color,"start_at":normalize_time(&start)?,
    "end_at":if end.is_empty(){Value::Null}else{json!(normalize_time(&end)?)} }));
