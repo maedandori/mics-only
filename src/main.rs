@@ -347,8 +347,6 @@ fn run(c: Config) -> Result<(), String> {
     let mut schedule_polled_at:Option<std::time::Instant>=None;
     let mut materials_polled_at:Option<std::time::Instant>=None;
     let mut materials_sync_failed=false;
-    let mut materials_upload_pending=false;
-    let mut materials_upload_attempted_at:Option<std::time::Instant>=None;
     let mut last_presence:Option<std::time::Instant>=None;
     loop {
         local.schedule_next_poll(None); // Current agent cycle is in progress.
@@ -369,26 +367,12 @@ fn run(c: Config) -> Result<(), String> {
                     match materials::sync(&c,&db_password){
                         Ok(n)=>{
                             materials_sync_failed=false;
-                            materials_upload_pending=true;
-                            println!("MATERIAL_LOCAL_SYNC_OK rows={n}");
+                            println!("MATERIAL_LOCAL_ONLY_OK mapped_products={n}; no Turso upload");
                         },
                         Err(e)=>{
                             materials_sync_failed=true;
                             eprintln!("MATERIAL_LOCAL_SYNC_FAILED {e}");
                         }
-                    }
-                }
-                // Upload retries every five minutes after a failed request, without
-                // another Firebird scan. Unchanged snapshots cause zero remote writes.
-                if materials_upload_pending &&
-                    materials_upload_attempted_at.map(|t|t.elapsed()>=Duration::from_secs(300)).unwrap_or(true){
-                    materials_upload_attempted_at=Some(std::time::Instant::now());
-                    match materials::upload(&c,&sync_token){
-                        Ok(changes)=>{
-                            materials_upload_pending=false;
-                            println!("MATERIAL_TURSO_DELTA_OK changed_or_removed={changes}");
-                        },
-                        Err(e)=>eprintln!("MATERIAL_TURSO_DELTA_FAILED {e}")
                     }
                 }
                 if schedule_polled_at.map(|t|t.elapsed()>=Duration::from_secs(60)).unwrap_or(true){
