@@ -77,6 +77,16 @@ const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>Array.from(r.quer
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const order=[15,8,19,14,5,17,13,6,10,11,18,7,12,16], byOrder=n=>{const i=order.indexOf(Number(n));return i<0?999:i};
 const dashboard=location.pathname==='/'||location.pathname.endsWith('/index.html');
+// A single unit's WEIGHT is grams including its share of the runner.
+function materialEstimate(qtyRaw,pickRaw,weightRaw){
+ const qty=Number(qtyRaw),pick=Number(pickRaw),grams=Number(weightRaw);
+ if(qtyRaw==null||pickRaw==null||weightRaw==null||String(qtyRaw).trim()===''||String(pickRaw).trim()===''||String(weightRaw).trim()==='')return null;
+ if(!Number.isSafeInteger(qty)||qty<=0||!Number.isSafeInteger(pick)||pick<=0||!Number.isFinite(grams)||grams<=0)return null;
+ const shots=Math.ceil(qty/pick),produced=shots*pick,totalKg=produced*grams/1000;
+ if(!Number.isSafeInteger(produced)||!Number.isFinite(totalKg)||totalKg<=0)return null;
+ return {qty,pick,grams,shots,produced,totalKg};
+}
+const formatKg=n=>Number(n).toLocaleString('ja-JP',{maximumFractionDigits:3})+' kg';
 function titleText(node){return (node?.textContent||'').replace(/\\s+/g,' ').trim()}
 const nav=document.createElement('nav');
 nav.id='mics-local-tabs';nav.setAttribute('aria-label','画面切り替え');
@@ -166,29 +176,38 @@ function showDetails(r){
    +'<strong style="overflow-wrap:anywhere">'+esc(v.name)+'</strong><span style="font-weight:700;white-space:nowrap">'+esc(ratioLabel(v.percentage))+'</span>'
    +'<span data-mics-weight-pct="'+(v.percentage!==null&&Number.isFinite(Number(v.percentage))?Number(v.percentage):'')+'" style="min-width:70px;text-align:right;white-space:nowrap">—</span></div>').join('')+'</div>'
   :'<p style="margin:0;color:#64748b">原料データがありません</p>';
- const canCalc=materialsData.some(v=>v.percentage!==null&&Number.isFinite(Number(v.percentage)));
+ const canCalc=materialsData.length>0&&materialsData.every(v=>v.percentage!==null&&Number.isFinite(Number(v.percentage)));
  details.innerHTML='<section role="dialog" aria-modal="true" aria-labelledby="mics-products-detail-title" style="box-sizing:border-box;width:100%;max-width:540px;max-height:calc(100dvh - 24px);overflow-y:auto;border-radius:14px;padding:18px;background:#fff;color:#0f172a;box-shadow:0 20px 60px rgba(0,0,0,.25)">'
  +'<header style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px"><div><h2 id="mics-products-detail-title" style="margin:0 0 6px;font-size:19px">品番の詳細</h2><strong style="color:#1d4ed8;font-size:16px;overflow-wrap:anywhere">'+esc(r.parts_no||r.order_no||'—')+'</strong></div><button type="button" id="mics-products-close-detail" aria-label="閉じる" style="flex:none;border:1px solid #cbd5e1;border-radius:9px;padding:7px 13px;font-size:18px;background:#f1f5f9;color:#0f172a;cursor:pointer">×</button></header>'
  +'<dl style="margin:0;display:grid;grid-template-columns:minmax(90px,34%) minmax(0,1fr);gap:9px 12px;font-size:14px">'
  +item('号機',machineKey(r)+'号機')+item('品番',r.parts_no||'—')+item('受注番号',r.order_no||'—')
  +item('品名',r.product_name||'—')+item('金型',[(r.mold_name||''),(r.mold_no||'')].filter(Boolean).join(' / ')||'—')
  +item('色',r.color||'—')+item('開始',formatDate(r.start_at))+item('終了',formatDate(r.end_at))
- +(r.qty_plan!=null?item('予定数',Number(r.qty_plan).toLocaleString('ja-JP')):'')
- +(r.part_weight_raw!=null&&r.part_weight_raw!==''?item('WEIGHT (MICS原値)',r.part_weight_raw):'')+'</dl>'
+ +(r.part_weight_raw!=null&&r.part_weight_raw!==''?item('WEIGHT (g/個、ランナー込み)',r.part_weight_raw):'')+'</dl>'
  +'<div style="margin-top:16px;border-top:1px solid #e2e8f0;padding-top:13px"><strong style="display:block;margin-bottom:8px">使用原料・配合率・必要重量</strong>'
- +(canCalc?'<label style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;font-weight:700;margin-bottom:6px">総原料重量 (kg) <input id="mics-material-total-kg" type="number" min="0" step="any" inputmode="decimal" placeholder="例: 25" style="width:115px;max-width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px"></label><small style="display:block;margin-bottom:12px;color:#64748b">各原料の kg は入力した総重量からの計算値で、実際の計量結果ではありません。</small>':'<p style="color:#64748b;margin-bottom:8px">配合比率データなし</p>')
+ +'<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px">'
+ +'<label style="font-size:12px;font-weight:700">予定数 (個)<input id="mics-material-plan-qty" type="number" min="1" step="1" inputmode="numeric" value="'+esc(r.qty_plan??'')+'" placeholder="数量を入力" style="display:block;box-sizing:border-box;width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px;margin-top:4px"></label>'
+ +'<label style="font-size:12px;font-weight:700">取り数 (個/ショット)<input id="mics-material-pick-qty" type="number" min="1" step="1" inputmode="numeric" value="'+esc(r.pick_qty??'')+'" placeholder="取り数を入力" style="display:block;box-sizing:border-box;width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px;margin-top:4px"></label></div>'
+ +'<div id="mics-material-calculation" aria-live="polite" style="padding:10px 12px;border-radius:8px;background:#eff6ff;color:#1e3a8a;font-size:13px;margin-bottom:8px"></div>'
+ +(canCalc?'<small style="display:block;margin-bottom:12px;color:#64748b">WEIGHTはランナー込みの1個重量(g)。全ショット数を切り上げてkgを計算。配合率で原料別に按分した推定値です。</small>':'<p style="color:#64748b;margin-bottom:8px">配合比率データなし（合計重量は計算できます）</p>')
  +materials+'</div></section>';
  details.hidden=false;
  details.style.display='flex';
- const input=$('#mics-material-total-kg',details);
- input?.addEventListener('input',()=>{
-  const raw=String(input.value||'').trim(),weight=Number(raw);
+ const planInput=$('#mics-material-plan-qty',details),pickInput=$('#mics-material-pick-qty',details);
+ function updateEstimate(){
+  const result=materialEstimate(planInput?.value,pickInput?.value,r.part_weight_raw);
+  const summary=$('#mics-material-calculation',details);
+  if(summary)summary.textContent=result
+   ?'必要原料重量: '+formatKg(result.totalKg)+' / '+result.shots.toLocaleString('ja-JP')+' ショット × '+result.pick+' 個 = '+result.produced.toLocaleString('ja-JP')+' 個'+(result.produced>result.qty?' (予定数より '+(result.produced-result.qty)+' 個多く成形)':'')
+   :'必要重量: 計算不可（WEIGHT・予定数・取り数を確認してください）';
   details.querySelectorAll('[data-mics-weight-pct]').forEach(node=>{
-   const pct=Number(node.dataset.micsWeightPct);
-   node.textContent=raw&&weight>0&&Number.isFinite(weight)&&node.dataset.micsWeightPct!==''&&Number.isFinite(pct)
-    ?(weight*pct/100).toLocaleString('ja-JP',{maximumFractionDigits:3})+' kg':'—';
+   const raw=node.dataset.micsWeightPct,pct=Number(raw);
+   node.textContent=result&&canCalc&&raw!==''&&Number.isFinite(pct)?formatKg(result.totalKg*pct/100):'—';
   });
- });
+ }
+ planInput?.addEventListener('input',updateEstimate);
+ pickInput?.addEventListener('input',updateEstimate);
+ updateEstimate();
  const close=$('#mics-products-close-detail',details);
  close?.addEventListener('click',closeDetails);
  close?.focus();
@@ -278,7 +297,11 @@ async function load(){
   const active=Array.isArray(machines.machines)?machines.machines:[];
   // Every scheduled order for every machine; include a running machine only if no matching order is scheduled.
   const known=new Set(scheduled.map(r=>machineKey(r)+'|'+String(r.order_no??'')));
-  rows=scheduled.slice();
+  const activeByOrder=new Map(active.filter(m=>m.order_no&&m.status_code!=='AMBIGUOUS').map(m=>[machineKey(m)+'|'+String(m.order_no),m]));
+  rows=scheduled.map(r=>{
+   const m=activeByOrder.get(machineKey(r)+'|'+String(r.order_no??''));
+   return m?{...r,qty_plan:m.qty_plan??r.qty_plan,pick_qty:m.pick_qty??r.pick_qty}:r;
+  });
   for(const m of active)if(m.order_no&&!known.has(machineKey(m)+'|'+String(m.order_no)))rows.unshift({...m,start_at:m.start_at||m.started_at||'',end_at:m.end_at||m.scheduled_end_at||''});
   render();
  }catch(err){$('#mics-products-count',page).textContent='ローカルJSONの読み込みに失敗しました: '+err.message}

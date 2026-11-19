@@ -80,3 +80,17 @@ test('header countdown uses the real agent cycle without DB requests',()=>{
  assert.ok(agent.includes('local.schedule_next_poll(Some(c.interval))'))
  assert.ok(agent.includes('local.schedule_next_poll(if valid_url&&!mirror_secret.is_empty(){Some(300)}else{None})'))
 })
+
+test('material weight respects shot rounding and missing inputs',()=>{
+ const ui=readFileSync(base+'local-horizontal-tabs.js','utf8')
+ const a=ui.indexOf('function materialEstimate('),b=ui.indexOf('function titleText(',a)
+ assert.ok(a>0&&b>a)
+ const estimate=new Function(ui.slice(a,b)+'return materialEstimate;')()
+ assert.equal(estimate(10001,4,117).shots,2501)
+ assert.equal(estimate(10001,4,117).produced,10004)
+ assert.equal(estimate(10001,4,117).totalKg,1170.468)
+ assert.equal(estimate(10000,4,117).totalKg,1170)
+ for(const args of [[0,4,117],[100,0,117],[100,2.5,117],['',4,117],[100,4,null]])assert.equal(estimate(...args),null)
+ assert.ok(ui.includes('qty_plan:m.qty_plan??r.qty_plan'))
+ assert.ok(ui.includes('pick_qty:m.pick_qty??r.pick_qty'))
+})
