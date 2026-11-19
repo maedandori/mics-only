@@ -129,9 +129,9 @@ let rows=[], showing=false, loading=false, visibleRows=[];
 const details=document.createElement('div');
 details.id='mics-products-detail';
 details.hidden=true;
-details.style.cssText='position:fixed;inset:0;z-index:15000;background:rgba(15,23,42,.75);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box';
+details.style.cssText='position:fixed;inset:0;z-index:15000;background:rgba(15,23,42,.75);display:none;align-items:center;justify-content:center;padding:12px;box-sizing:border-box';
 page.append(details);
-function closeDetails(){details.hidden=true;details.innerHTML='';}
+function closeDetails(){details.hidden=true;details.style.display='none';details.innerHTML='';}
 function showDetails(r){
  const item=(label,value)=>'<dt style="font-weight:700;color:#64748b">'+esc(label)+'</dt><dd style="margin:0;overflow-wrap:anywhere">'+esc(value??'—')+'</dd>';
  const names=Array.isArray(r.material_names)?r.material_names.filter(Boolean):[];
@@ -145,6 +145,7 @@ function showDetails(r){
  +(r.qty_plan!=null?item('予定数',Number(r.qty_plan).toLocaleString('ja-JP')):'')+'</dl>'
  +'<div style="margin-top:16px;border-top:1px solid #e2e8f0;padding-top:13px"><strong style="display:block;margin-bottom:8px">使用原料</strong>'+materials+'</div></section>';
  details.hidden=false;
+ details.style.display='flex';
  const close=$('#mics-products-close-detail',details);
  close?.addEventListener('click',closeDetails);
  close?.focus();
