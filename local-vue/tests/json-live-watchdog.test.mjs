@@ -94,3 +94,15 @@ test('material weight respects shot rounding and missing inputs',()=>{
  assert.ok(ui.includes('qty_plan:m.qty_plan??r.qty_plan'))
  assert.ok(ui.includes('pick_qty:m.pick_qty??r.pick_qty'))
 })
+
+test('clicking any all-products cell opens details; keyboard activation works',()=>{
+ const ui=readFileSync(base+'local-horizontal-tabs.js','utf8')
+ assert.ok(ui.includes("e.target.closest('tr[data-mics-detail]')"))
+ assert.ok(ui.includes("productRows.addEventListener('click'"))
+ assert.ok(ui.includes("productRows.addEventListener('keydown'"))
+ assert.ok(ui.includes("e.key!=='Enter'&&e.key!==' '"))
+ assert.ok(ui.includes('tabindex="0" role="button" aria-label="品番の詳細:'))
+ assert.ok(!ui.includes('<button type="button" data-mics-detail='))
+ const css=readFileSync('www/vue-v'+JSON.parse(readFileSync('local-vue/package.json','utf8')).version+'/css/local-horizontal-tabs.css','utf8')
+ assert.ok(css.includes('#mics-products tr[data-mics-detail]:focus-visible'))
+})
