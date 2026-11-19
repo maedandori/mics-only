@@ -81,10 +81,11 @@ pub fn upload(c:&Config,token:&str)->Result<usize,String>{
  let endpoint=if c.coordinator_url.ends_with("/api/mics-failover"){
   format!("{}/api/integrations/mics/materials",c.coordinator_url.trim_end_matches("/api/mics-failover"))
  }else{endpoint};
- for chunk in rows.chunks(200){
+ let total_chunks=rows.chunks(200).len();
+ for (index,chunk) in rows.chunks(200).enumerate(){
   let result:serde_json::Value=super::client().post(&endpoint)
    .set("Authorization",&format!("Bearer {token}"))
-   .send_json(serde_json::json!({"rows":chunk}))
+   .send_json(serde_json::json!({"rows":chunk,"snapshot_id":digest,"final":index+1==total_chunks}))
    .map_err(|e|format!("MATERIAL_UPLOAD_FAILED {e}"))?
    .into_json().map_err(|e|e.to_string())?;
   if result["ok"]!=true{return Err("MATERIAL_UPLOAD_NOT_ACKNOWLEDGED".into())}
