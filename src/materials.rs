@@ -2,6 +2,7 @@ use crate::Config;
 use rsfbclient::prelude::*;
 use std::{env,fs,path::PathBuf};
 use chrono::Utc;
+use sha2::Digest;
 
 fn csv_field(s:&str)->String { format!("\"{}\"",s.replace('"',"\"\"")) }
 fn output_path()->Result<PathBuf,String>{
@@ -47,4 +48,47 @@ pub fn sync(c:&Config,password:&str)->Result<usize,String>{
  let _=fs::remove_file(&backup);
  println!("MATERIAL_CSV_UPDATED count={count} at={} ",Utc::now().to_rfc3339());
  Ok(count)
+}
+
+fn parse_csv_line(line:&str)->Vec<String>{
+ let mut fields=Vec::new();let mut field=String::new();let mut chars=line.chars().peekable();let mut quoted=false;
+ while let Some(ch)=chars.next(){
+  match ch{
+   '"' if quoted&&chars.peek()==Some(&'"')=>{field.push('"');chars.next();},
+   '"'=>quoted=!quoted,
+   ',' if !quoted=>{fields.push(std::mem::take(&mut field));},
+   _=>field.push(ch)
+  }
+ }
+ fields.push(field);fields
+}
+pub fn upload(c:&Config,token:&str)->Result<usize,String>{
+ let content=fs::read_to_string(output_path()?).map_err(|e|e.to_string())?;
+ let mut rows=Vec::new();
+ for line in content.lines().skip(1){
+  let f=parse_csv_line(line.trim_end_matches('\r'));
+  if f.len()!=8||f[1].is_empty(){continue}
+  let names=f[2..].iter().filter(|x|!x.is_empty()&&!x.contains("廃番")).cloned().collect::<Vec<_>>();
+  if names.is_empty(){continue}
+  rows.push(serde_json::json!({"entry_no":f[0],"parts_no":f[1],"names":names}));
+ }
+ if rows.is_empty(){return Err("MATERIAL_UPLOAD_EMPTY".into())}
+ let digest=format!("{:x}",sha2::Sha256::digest(content.as_bytes()));
+ let ack=output_path()?.with_file_name("materials-last-ack.sha256");
+ if fs::read_to_string(&ack).ok().as_deref()==Some(digest.as_str()){return Ok(0)}
+ let endpoint=format!("{}/materials",c.coordinator_url.trim_end_matches('/')).replace("/api/mics-failover/materials","/api/integrations/mics/materials");
+ // Coordinator URL is /api/mics-failover; material endpoint is an authenticated integration route.
+ let endpoint=if c.coordinator_url.ends_with("/api/mics-failover"){
+  format!("{}/api/integrations/mics/materials",c.coordinator_url.trim_end_matches("/api/mics-failover"))
+ }else{endpoint};
+ for chunk in rows.chunks(200){
+  let result:serde_json::Value=super::client().post(&endpoint)
+   .set("Authorization",&format!("Bearer {token}"))
+   .send_json(serde_json::json!({"rows":chunk}))
+   .map_err(|e|format!("MATERIAL_UPLOAD_FAILED {e}"))?
+   .into_json().map_err(|e|e.to_string())?;
+  if result["ok"]!=true{return Err("MATERIAL_UPLOAD_NOT_ACKNOWLEDGED".into())}
+ }
+ fs::write(ack,digest).map_err(|e|e.to_string())?;
+ Ok(rows.len())
 }
