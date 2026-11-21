@@ -217,6 +217,78 @@ fn read(c: &Config, password: &str) -> Result<Value, String> {
     }
     Ok(json!({"source":"mics-data","machines":result.into_values().collect::<Vec<_>>() }))
 }
+#[derive(Clone, Debug)]
+struct CloudMachineBaseline {
+    fingerprint: String,
+    status_code: String,
+    qty_plan: i64,
+    qty_ok: i64,
+    qty_ng: i64,
+    qty_remaining: i64,
+    cycle_seconds: Option<f64>,
+    pick_qty: Option<f64>,
+    sampled_at_ms: i64,
+}
+impl CloudMachineBaseline {
+    fn from_machine(m: &Value, sampled_at_ms: i64) -> Self {
+        Self {
+            fingerprint: critical_machine_fingerprint(m),
+            status_code: m["status_code"].as_str().unwrap_or_default().to_string(),
+            qty_plan: m["qty_plan"].as_i64().unwrap_or(0).max(0),
+            qty_ok: m["qty_ok"].as_i64().unwrap_or(0).max(0),
+            qty_ng: m["qty_ng"].as_i64().unwrap_or(0).max(0),
+            qty_remaining: m["qty_remaining"].as_i64().unwrap_or(0).max(0),
+            cycle_seconds: m["cycle_seconds"].as_f64().filter(|c| c.is_finite() && *c > 0.0),
+            pick_qty: m["pick_qty"].as_f64().filter(|p| p.is_finite() && *p > 0.0),
+            sampled_at_ms,
+        }
+    }
+    fn predict_qty_ok(&self, now_ms: i64) -> i64 {
+        if !matches!(self.status_code.as_str(), "200" | "210") {
+            return self.qty_ok;
+        }
+        let (Some(cycle), Some(pick)) = (self.cycle_seconds, self.pick_qty) else {
+            return self.qty_ok;
+        };
+        let elapsed_ms = now_ms - self.sampled_at_ms;
+        if elapsed_ms <= 0 || elapsed_ms > 86_400_000 {
+            return self.qty_ok;
+        }
+        let extra_shots = ((elapsed_ms as f64) / (cycle * 1000.0)).floor();
+        if extra_shots <= 0.0 {
+            return self.qty_ok;
+        }
+        let added = (extra_shots * pick).round() as i64;
+        if self.qty_plan > 0 {
+            (self.qty_ok + added).min(self.qty_plan).max(self.qty_ok)
+        } else {
+            self.qty_ok + added.max(0)
+        }
+    }
+    fn needs_sync(&self, m: &Value, now_ms: i64) -> bool {
+        if critical_machine_fingerprint(m) != self.fingerprint {
+            return true;
+        }
+        let real_ok = m["qty_ok"].as_i64().unwrap_or(0).max(0);
+        let real_ng = m["qty_ng"].as_i64().unwrap_or(0).max(0);
+        let real_rem = m["qty_remaining"].as_i64().unwrap_or(0).max(0);
+        if real_ng != self.qty_ng {
+            return true;
+        }
+        if real_rem == 0 && self.qty_remaining > 0 {
+            return true;
+        }
+        let predicted_ok = self.predict_qty_ok(now_ms);
+        let status = m["status_code"].as_str().unwrap_or_default();
+        let tolerance = if matches!(status, "200" | "210") {
+            let pick = m["pick_qty"].as_f64().unwrap_or(1.0).ceil() as i64;
+            pick.max(1) * 2
+        } else {
+            1
+        };
+        (real_ok - predicted_ok).abs() >= tolerance
+    }
+}
 fn critical_machine_fingerprint(m: &Value) -> String {
     let has_cycle = m["cycle_seconds"].as_f64().is_some_and(|c| c > 0.0);
     serde_json::to_string(&json!([
@@ -233,13 +305,16 @@ fn critical_machine_fingerprint(m: &Value) -> String {
         has_cycle,
     ])).unwrap_or_default()
 }
-fn changed_cloud_machines(machines: &[Value], previous: &BTreeMap<i32, String>) -> Vec<(i32, String, Value)> {
+fn changed_cloud_machines(machines: &[Value], previous: &BTreeMap<i32, CloudMachineBaseline>, now_ms: i64) -> Vec<(i32, CloudMachineBaseline, Value)> {
     let mut out = Vec::new();
     for m in machines {
         let Some(no) = m["machine_no"].as_i64().map(|n| n as i32) else { continue };
-        let fp = critical_machine_fingerprint(m);
-        if previous.get(&no) != Some(&fp) {
-            out.push((no, fp, m.clone()));
+        let should_sync = match previous.get(&no) {
+            Some(base) => base.needs_sync(m, now_ms),
+            None => true,
+        };
+        if should_sync {
+            out.push((no, CloudMachineBaseline::from_machine(m, now_ms), m.clone()));
         }
     }
     out
@@ -383,7 +458,7 @@ fn run(c: Config) -> Result<(), String> {
         secret("MICS_COORDINATOR_TOKEN")?,
     );
     let mut previous_hash = String::new();
-    let mut previous_cloud_state: BTreeMap<i32, String> = BTreeMap::new();
+    let mut previous_cloud_state: BTreeMap<i32, CloudMachineBaseline> = BTreeMap::new();
     let mut last_mirror:Option<std::time::Instant>=None;
     let mut schedule_polled_at:Option<std::time::Instant>=None;
     let mut materials_polled_at:Option<std::time::Instant>=None;
@@ -449,16 +524,18 @@ fn run(c: Config) -> Result<(), String> {
                             eprintln!("MICS_READ_EMPTY: refused to overwrite current data");
                         } else {
                             let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&data).unwrap_or_default()));
-                            let now_rfc3339 = Utc::now().to_rfc3339();
+                            let now = Utc::now();
+                            let now_rfc3339 = now.to_rfc3339();
+                            let now_ms = now.timestamp_millis();
                             if hash != previous_hash {
                                 data["sampled_at"] = json!(now_rfc3339.clone());
                                 if let Err(e)=local.update(data.clone()){eprintln!("LOCAL_SNAPSHOT_FAILED {e}")}
                                 previous_hash = hash;
                             }
                             let machines_slice = data["machines"].as_array().cloned().unwrap_or_default();
-                            let changed = changed_cloud_machines(&machines_slice, &previous_cloud_state);
+                            let changed = changed_cloud_machines(&machines_slice, &previous_cloud_state, now_ms);
                             if !changed.is_empty() {
-                                // Only upload to Cloud/Turso when a machine changes status, mold, or order/product code.
+                                // Only upload to Cloud/Turso when status/mold/order changes or real qty drifts from Web auto-increment.
                                 match acquire(&c, &coordinator_token) {
                                     Ok(Some(new_lease)) if new_lease.epoch == lease.epoch => {
                                         let cloud_payload = json!({
@@ -468,11 +545,11 @@ fn run(c: Config) -> Result<(), String> {
                                         });
                                         match upload(&c, &sync_token, &new_lease, cloud_payload) {
                                             Ok(()) => {
-                                                for (no, fp, _) in changed {
-                                                    previous_cloud_state.insert(no, fp);
+                                                for (no, base, _) in changed {
+                                                    previous_cloud_state.insert(no, base);
                                                 }
                                                 local.record_sync("SYNCED");
-                                                println!("MICS_SYNC_OK epoch={} changed_machines={}", new_lease.epoch, previous_cloud_state.len());
+                                                println!("MICS_SYNC_OK epoch={} synced_machines={}", new_lease.epoch, previous_cloud_state.len());
                                             },
                                             Err(e) => {local.record_sync("RETRY_PENDING");eprintln!("{e}");},
                                         }
@@ -664,31 +741,38 @@ mod tests {
             "machine_no": 8, "order_no": "ORD-1", "status_code": "200",
             "product_name": "PROD-A", "mold_no": "M-01", "mold_name": "MOLD-A",
             "qty_plan": 1000, "qty_ok": 120, "qty_ng": 1, "qty_remaining": 880,
-            "cycle_seconds": 24.5, "pick_qty": 4.0, "staff_name": "SATO", "scheduled_end_at": null
+            "cycle_seconds": 20.0, "pick_qty": 4.0, "staff_name": "SATO", "scheduled_end_at": null
         });
+        let t0 = 1_700_000_000_000i64;
         let mut state = BTreeMap::new();
-        let initial = changed_cloud_machines(std::slice::from_ref(&m1), &state);
+        let initial = changed_cloud_machines(std::slice::from_ref(&m1), &state, t0);
         assert_eq!(initial.len(), 1);
-        for (no, fp, _) in initial { state.insert(no, fp); }
+        for (no, base, _) in initial { state.insert(no, base); }
 
-        // Shot counter and minor cycle time changes must NOT trigger a cloud write.
-        let mut m1_next_shot = m1.clone();
-        m1_next_shot["qty_ok"] = json!(124);
-        m1_next_shot["qty_remaining"] = json!(876);
-        m1_next_shot["cycle_seconds"] = json!(24.48);
-        assert!(changed_cloud_machines(&[m1_next_shot], &state).is_empty());
+        // After 20s (1 cycle of 20s * 4 pick_qty = +4 pieces), real qty_ok=124 matches Web prediction => 0 cloud writes.
+        let mut m1_on_pace = m1.clone();
+        m1_on_pace["qty_ok"] = json!(124);
+        m1_on_pace["qty_remaining"] = json!(876);
+        m1_on_pace["cycle_seconds"] = json!(20.1);
+        assert!(changed_cloud_machines(&[m1_on_pace], &state, t0 + 20_000).is_empty());
 
-        // Status, mold, or order/product change MUST trigger an immediate cloud write.
+        // If real qty_ok drifts from Web prediction by >= 2 shots (>= 8 pieces) at t0 + 60s, sync real qty immediately!
+        let mut m1_drifted = m1.clone();
+        m1_drifted["qty_ok"] = json!(120); // Machine stalled without changing status yet (Web predicted 132)
+        m1_drifted["qty_remaining"] = json!(880);
+        assert_eq!(changed_cloud_machines(&[m1_drifted], &state, t0 + 60_000).len(), 1);
+
+        // Status, mold, order/product, or NG change MUST trigger an immediate cloud write.
         let mut m1_status_change = m1.clone();
         m1_status_change["status_code"] = json!("100");
-        assert_eq!(changed_cloud_machines(&[m1_status_change], &state).len(), 1);
+        assert_eq!(changed_cloud_machines(&[m1_status_change], &state, t0 + 5_000).len(), 1);
 
         let mut m1_mold_change = m1.clone();
         m1_mold_change["mold_no"] = json!("M-02");
-        assert_eq!(changed_cloud_machines(&[m1_mold_change], &state).len(), 1);
+        assert_eq!(changed_cloud_machines(&[m1_mold_change], &state, t0 + 5_000).len(), 1);
 
         let mut m1_order_change = m1.clone();
         m1_order_change["order_no"] = json!("ORD-2");
-        assert_eq!(changed_cloud_machines(&[m1_order_change], &state).len(), 1);
+        assert_eq!(changed_cloud_machines(&[m1_order_change], &state, t0 + 5_000).len(), 1);
     }
 }
