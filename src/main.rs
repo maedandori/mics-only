@@ -125,22 +125,35 @@ fn read(c: &Config, password: &str) -> Result<Value, String> {
     b.host(&c.host).port(c.port).db_name(&c.database).user(&c.user).pass(password);
     b.with_transaction(|tr| tr.read_only().no_wait());
     let mut db = b.connect().map_err(|e| e.to_string())?;
-    // Match the mics-print mapping and preserve compatibility with older MICS schemas.
-    let mend_rows: Vec<(i64,)> = db.query(
-        "SELECT COUNT(*) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='SCHEDULE' AND TRIM(RDB$FIELD_NAME)='MEND'", ()
-    ).map_err(|e| e.to_string())?;
-    let mend = if mend_rows.first().is_some_and(|r| r.0 > 0) {
+    // Cache schema column presence once per process so 20s polls do not repeat 3 system-catalog queries.
+    static SCHEMA_FLAGS: std::sync::OnceLock<(bool, bool, bool)> = std::sync::OnceLock::new();
+    let (has_mend, has_pick, has_today) = match SCHEMA_FLAGS.get().copied() {
+        Some(flags) => flags,
+        None => {
+            let mend_rows: Vec<(i64,)> = db.query(
+                "SELECT COUNT(*) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='SCHEDULE' AND TRIM(RDB$FIELD_NAME)='MEND'", ()
+            ).map_err(|e| e.to_string())?;
+            let pick_rows: Vec<(i64,)> = db.query(
+                "SELECT COUNT(*) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='MACHINEWORK' AND TRIM(RDB$FIELD_NAME)='REALPICKQTY'", ()
+            ).map_err(|e| e.to_string())?;
+            let today_rows: Vec<(i64,)> = db.query(
+                "SELECT COUNT(*) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='MACHINEWORK' AND TRIM(RDB$FIELD_NAME)='TODAYQTYNG'", ()
+            ).map_err(|e| e.to_string())?;
+            let flags = (
+                mend_rows.first().is_some_and(|r| r.0 > 0),
+                pick_rows.first().is_some_and(|r| r.0 > 0),
+                today_rows.first().is_some_and(|r| r.0 > 0),
+            );
+            let _ = SCHEMA_FLAGS.set(flags);
+            flags
+        }
+    };
+    let mend = if has_mend {
         "COALESCE(TRIM(CAST(S.MEND AS VARCHAR(40))), '')"
     } else { "CAST('' AS VARCHAR(40))" };
-    let pick_rows: Vec<(i64,)> = db.query(
-        "SELECT COUNT(*) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='MACHINEWORK' AND TRIM(RDB$FIELD_NAME)='REALPICKQTY'", ()
-    ).map_err(|e| e.to_string())?;
-    let pick = if pick_rows.first().is_some_and(|r| r.0 > 0) {
+    let pick = if has_pick {
         "COALESCE(TRIM(CAST(W.REALPICKQTY AS VARCHAR(24))), '')"
     } else { "CAST('' AS VARCHAR(24))" };
-    let today_rows: Vec<(i64,)> = db.query(
-        "SELECT COUNT(*) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='MACHINEWORK' AND TRIM(RDB$FIELD_NAME)='TODAYQTYNG'", ()
-    ).map_err(|e| e.to_string())?;
 
     let sql = format!(
         "SELECT TRIM(CAST(W.MACHINENO AS VARCHAR(24))),
@@ -166,7 +179,7 @@ fn read(c: &Config, password: &str) -> Result<Value, String> {
     // A separate query avoids extending the 13-column Firebird row tuple.
     // MICS maintains TODAYQTYNG itself, so no local shift subtraction is needed.
     let mut today_by_machine: BTreeMap<i32,i64> = BTreeMap::new();
-    if today_rows.first().is_some_and(|r|r.0>0) {
+    if has_today {
         let today_values: Vec<(String,String)> = db.query(
             "SELECT TRIM(CAST(MACHINENO AS VARCHAR(24))), COALESCE(TRIM(CAST(TODAYQTYNG AS VARCHAR(24))), '') FROM MACHINEWORK WHERE MACHINENO IN (5,6,7,8,10,11,12,13,14,15,16,17,18,19)", ()
         ).map_err(|e|e.to_string())?;
@@ -203,6 +216,33 @@ fn read(c: &Config, password: &str) -> Result<Value, String> {
         }));
     }
     Ok(json!({"source":"mics-data","machines":result.into_values().collect::<Vec<_>>() }))
+}
+fn critical_machine_fingerprint(m: &Value) -> String {
+    let has_cycle = m["cycle_seconds"].as_f64().is_some_and(|c| c > 0.0);
+    serde_json::to_string(&json!([
+        m["machine_no"],
+        m["status_code"],
+        m["order_no"],
+        m["product_name"],
+        m["mold_no"],
+        m["mold_name"],
+        m["staff_name"],
+        m["qty_plan"],
+        m["pick_qty"],
+        m["scheduled_end_at"],
+        has_cycle,
+    ])).unwrap_or_default()
+}
+fn changed_cloud_machines(machines: &[Value], previous: &BTreeMap<i32, String>) -> Vec<(i32, String, Value)> {
+    let mut out = Vec::new();
+    for m in machines {
+        let Some(no) = m["machine_no"].as_i64().map(|n| n as i32) else { continue };
+        let fp = critical_machine_fingerprint(m);
+        if previous.get(&no) != Some(&fp) {
+            out.push((no, fp, m.clone()));
+        }
+    }
+    out
 }
 fn upload(c: &Config, sync_token: &str, lease: &Lease, snapshot: Value) -> Result<(), String> {
     let response = client().post(&format!("{}/sync", c.coordinator_url.trim_end_matches('/')))
@@ -343,6 +383,7 @@ fn run(c: Config) -> Result<(), String> {
         secret("MICS_COORDINATOR_TOKEN")?,
     );
     let mut previous_hash = String::new();
+    let mut previous_cloud_state: BTreeMap<i32, String> = BTreeMap::new();
     let mut last_mirror:Option<std::time::Instant>=None;
     let mut schedule_polled_at:Option<std::time::Instant>=None;
     let mut materials_polled_at:Option<std::time::Instant>=None;
@@ -408,19 +449,36 @@ fn run(c: Config) -> Result<(), String> {
                             eprintln!("MICS_READ_EMPTY: refused to overwrite current data");
                         } else {
                             let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&data).unwrap_or_default()));
-                            // Recheck lease to minimize reading during PRIMARY recovery.
-                            match acquire(&c, &coordinator_token) {
-                                Ok(Some(new_lease)) if new_lease.epoch == lease.epoch => {
-                                    if hash != previous_hash {
-                                        data["sampled_at"] = json!(Utc::now().to_rfc3339());
-                                        if let Err(e)=local.update(data.clone()){eprintln!("LOCAL_SNAPSHOT_FAILED {e}")}
-                                        match upload(&c, &sync_token, &new_lease, data) {
-                                            Ok(()) => { previous_hash = hash; local.record_sync("SYNCED"); println!("MICS_SYNC_OK epoch={}", new_lease.epoch); },
+                            let now_rfc3339 = Utc::now().to_rfc3339();
+                            if hash != previous_hash {
+                                data["sampled_at"] = json!(now_rfc3339.clone());
+                                if let Err(e)=local.update(data.clone()){eprintln!("LOCAL_SNAPSHOT_FAILED {e}")}
+                                previous_hash = hash;
+                            }
+                            let machines_slice = data["machines"].as_array().cloned().unwrap_or_default();
+                            let changed = changed_cloud_machines(&machines_slice, &previous_cloud_state);
+                            if !changed.is_empty() {
+                                // Only upload to Cloud/Turso when a machine changes status, mold, or order/product code.
+                                match acquire(&c, &coordinator_token) {
+                                    Ok(Some(new_lease)) if new_lease.epoch == lease.epoch => {
+                                        let cloud_payload = json!({
+                                            "source": "mics-data",
+                                            "sampled_at": now_rfc3339,
+                                            "machines": changed.iter().map(|(_, _, m)| m.clone()).collect::<Vec<_>>()
+                                        });
+                                        match upload(&c, &sync_token, &new_lease, cloud_payload) {
+                                            Ok(()) => {
+                                                for (no, fp, _) in changed {
+                                                    previous_cloud_state.insert(no, fp);
+                                                }
+                                                local.record_sync("SYNCED");
+                                                println!("MICS_SYNC_OK epoch={} changed_machines={}", new_lease.epoch, previous_cloud_state.len());
+                                            },
                                             Err(e) => {local.record_sync("RETRY_PENDING");eprintln!("{e}");},
                                         }
                                     }
+                                    _ => {local.record_sync("LEASE_LOST");eprintln!("LEASE_LOST: discard snapshot");},
                                 }
-                                _ => {local.record_sync("LEASE_LOST");eprintln!("LEASE_LOST: discard snapshot");},
                             }
                         }
                     }
@@ -430,6 +488,7 @@ fn run(c: Config) -> Result<(), String> {
             Ok(None) => {
                 local.set_mode("STANDBY");
                 previous_hash.clear();
+                previous_cloud_state.clear();
                 if last_mirror.map(|t|t.elapsed()>Duration::from_secs(300)).unwrap_or(true){
                     last_mirror=Some(std::time::Instant::now());
                     if let Err(e)=mirror::refresh(&c,&sync_token,&local){
@@ -437,7 +496,7 @@ fn run(c: Config) -> Result<(), String> {
                     }
                 }
             }
-            Err(e) => { local.set_mode("OFFLINE"); previous_hash.clear(); eprintln!("{e}"); }
+            Err(e) => { local.set_mode("OFFLINE"); previous_hash.clear(); previous_cloud_state.clear(); eprintln!("{e}"); }
         }
         // Schedule from the END of the work, matching the real sleep/cycle logic.
         local.schedule_next_poll(Some(c.interval));
@@ -599,5 +658,37 @@ mod tests {
     #[test] fn empty_lease_is_not_valid() {
         let l = Lease {granted:true, epoch:1, lease_token:"".into(), expires_at:"2099-01-01T00:00:00Z".into()};
         assert!(!l.valid("backup"));
+    }
+    #[test] fn critical_change_detection_filters_shot_counter_noise() {
+        let m1 = json!({
+            "machine_no": 8, "order_no": "ORD-1", "status_code": "200",
+            "product_name": "PROD-A", "mold_no": "M-01", "mold_name": "MOLD-A",
+            "qty_plan": 1000, "qty_ok": 120, "qty_ng": 1, "qty_remaining": 880,
+            "cycle_seconds": 24.5, "pick_qty": 4.0, "staff_name": "SATO", "scheduled_end_at": null
+        });
+        let mut state = BTreeMap::new();
+        let initial = changed_cloud_machines(std::slice::from_ref(&m1), &state);
+        assert_eq!(initial.len(), 1);
+        for (no, fp, _) in initial { state.insert(no, fp); }
+
+        // Shot counter and minor cycle time changes must NOT trigger a cloud write.
+        let mut m1_next_shot = m1.clone();
+        m1_next_shot["qty_ok"] = json!(124);
+        m1_next_shot["qty_remaining"] = json!(876);
+        m1_next_shot["cycle_seconds"] = json!(24.48);
+        assert!(changed_cloud_machines(&[m1_next_shot], &state).is_empty());
+
+        // Status, mold, or order/product change MUST trigger an immediate cloud write.
+        let mut m1_status_change = m1.clone();
+        m1_status_change["status_code"] = json!("100");
+        assert_eq!(changed_cloud_machines(&[m1_status_change], &state).len(), 1);
+
+        let mut m1_mold_change = m1.clone();
+        m1_mold_change["mold_no"] = json!("M-02");
+        assert_eq!(changed_cloud_machines(&[m1_mold_change], &state).len(), 1);
+
+        let mut m1_order_change = m1.clone();
+        m1_order_change["order_no"] = json!("ORD-2");
+        assert_eq!(changed_cloud_machines(&[m1_order_change], &state).len(), 1);
     }
 }
