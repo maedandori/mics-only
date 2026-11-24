@@ -32,6 +32,8 @@ jobs:
           $frontend = (Get-Content local-vue/package.json -Raw | ConvertFrom-Json).version
           if ($frontend -ne $version) { throw "Version mismatch: Cargo=$version, frontend=$frontend" }
           Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version"
+      - name: Preflight material calculation and data-source contract
+        run: node --test local-vue/tests/material-preflight.test.mjs
       - name: Build original HTML/CSS/JavaScript template (no Vue)
         working-directory: local-vue
         run: |
