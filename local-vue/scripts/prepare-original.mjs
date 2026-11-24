@@ -522,4 +522,7 @@ patchEventTags(root);
 // Mirror online next-change type/time and product code on local machine cards.
 const {patchNextChange}=await import('./patch-local-next-change.mjs');
 patchNextChange(root);
+// Expand local weekly change schedule from Mon-Sat (6d) to Mon-Sun (7d).
+const {patchWeekly7Days}=await import('./patch-weekly-7days.mjs');
+patchWeekly7Days(root);
 console.log('Prepared '+count+' original MICS Vue assets for local JSON and offline bundling');

@@ -33,7 +33,10 @@ pub fn refresh(c:&super::Config,token:&str,local:&super::local_web::LocalState)-
     let path=super::schedule::local_path();
     if let Some(parent)=path.parent(){fs::create_dir_all(parent).map_err(|e|e.to_string())?}
     let bytes=serde_json::to_vec_pretty(&payload).map_err(|e|e.to_string())?;
-    if fs::read(&path).ok().as_deref()==Some(bytes.as_slice()){return Ok(())}
+    if fs::read(&path).ok().as_deref()==Some(bytes.as_slice()){
+        let _=super::change_schedule::sync_default();
+        return Ok(())
+    }
     let tmp=path.with_extension("json.mirror-tmp");
     fs::write(&tmp,bytes).map_err(|e|e.to_string())?;
     let backup=path.with_extension("json.mirror-bak");
@@ -45,5 +48,6 @@ pub fn refresh(c:&super::Config,token:&str,local:&super::local_web::LocalState)-
         if backup.exists(){let _=fs::rename(&backup,&path);}
         return Err(e.to_string())
     }
+    let _=super::change_schedule::sync_default();
     Ok(())
 }

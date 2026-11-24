@@ -89,7 +89,12 @@ pub fn collect(c:&super::Config,password:&str)->Result<Value,String>{
     if let Some(dir)=path.parent(){fs::create_dir_all(dir).map_err(|e|e.to_string())?}
     // Never replace a usable cache with an empty or invalid response.
     let bytes=serde_json::to_vec_pretty(&cache).map_err(|e|e.to_string())?;
-    if fs::read(&path).ok().as_deref()==Some(bytes.as_slice()){return Ok(cache)}
+    if fs::read(&path).ok().as_deref()==Some(bytes.as_slice()){
+        if let Err(e)=super::change_schedule::sync_default(){
+            eprintln!("LOCAL_CHANGE_SCHEDULE_FAILED {e}");
+        }
+        return Ok(cache)
+    }
     let tmp=path.with_extension("json.tmp");
     fs::write(&tmp,&bytes).map_err(|e|e.to_string())?;
     let bak=path.with_extension("json.bak");
@@ -100,6 +105,9 @@ pub fn collect(c:&super::Config,password:&str)->Result<Value,String>{
     if let Err(e)=fs::rename(&tmp,&path){
         if bak.exists(){let _=fs::rename(&bak,&path);}
         return Err(e.to_string())
+    }
+    if let Err(e)=super::change_schedule::sync_default(){
+        eprintln!("LOCAL_CHANGE_SCHEDULE_FAILED {e}");
     }
     Ok(cache)
 }

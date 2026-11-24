@@ -23,6 +23,7 @@ pub struct LocalState {
     pub alias_sync_ack: Arc<Mutex<Option<i64>>>,
     pub machines_cache: Arc<Mutex<Option<(SystemTime,Vec<u8>)>>>,
     pub schedule_cache: Arc<Mutex<Option<(SystemTime,Vec<u8>)>>>,
+    pub change_schedule_cache: Arc<Mutex<Option<(SystemTime,Vec<u8>)>>>,
     pub live_subscribers: Arc<Mutex<Vec<mpsc::Sender<&'static str>>>>,
 }
 impl LocalState {
@@ -59,6 +60,7 @@ impl LocalState {
             alias_sync_ack:Arc::new(Mutex::new(None)),
             machines_cache:Arc::new(Mutex::new(None)),
             schedule_cache:Arc::new(Mutex::new(None)),
+            change_schedule_cache:Arc::new(Mutex::new(None)),
             live_subscribers:Arc::new(Mutex::new(Vec::new())),
             data_path}
     }
@@ -216,6 +218,11 @@ pub fn sync_aliases_now(state:&LocalState)->Result<(),String>{
   if alias_changed{
    save_template_json(&alias_path,&aliases,"change-aliases.json")
     .map_err(|e|format!("ALIAS_CACHE_ERROR: {e}"))?;
+   if let Some(dir)=state.data_path.parent(){
+    if state.data_path.with_file_name("schedule-local.json").is_file(){
+     let _=super::change_schedule::sync_for_data_dir(dir);
+    }
+   }
   }
   if color_changed{
    if let Err(e)=save_template_json(&color_path,&colors,"status-colors.json"){
@@ -384,6 +391,7 @@ fn start_local_json_watcher(state:LocalState){
   let targets=[
    (state.data_path.clone(),"machines"),
    (state.data_path.with_file_name("schedule-local.json"),"schedule"),
+   (state.data_path.with_file_name("change-schedule-week.json"),"change-schedule"),
    (state.data_path.with_file_name("change-aliases.json"),"settings"),
    (state.data_path.with_file_name("status-colors.json"),"settings")
   ];
@@ -437,6 +445,7 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
             "ok":true,
             "machines":json_version(&state.data_path),
             "schedule":json_version(&state.data_path.with_file_name("schedule-local.json")),
+            "change_schedule":json_version(&state.data_path.with_file_name("change-schedule-week.json")),
             "aliases":json_version(&state.data_path.with_file_name("change-aliases.json")),
             "colors":json_version(&state.data_path.with_file_name("status-colors.json")),
             "live_connections":state.live_subscribers.lock().map(|v|v.len()).unwrap_or(0)
@@ -560,6 +569,34 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
             if method=="HEAD"{&[]}else{&raw},"no-store");
         return
     }
+    if route=="/data/change-schedule-week.json" {
+        let path=state.data_path.with_file_name("change-schedule-week.json");
+        let mtime=fs::metadata(&path).and_then(|m|m.modified()).ok();
+        if let Some(t)=mtime {
+            if let Ok(guard)=state.change_schedule_cache.lock() {
+                if let Some((cached_t,cached_bytes))=guard.as_ref() {
+                    if *cached_t==t {
+                        reply(&mut stream,"200 OK","application/json; charset=utf-8",
+                            if method=="HEAD"{&[]}else{cached_bytes},"no-store");
+                        return
+                    }
+                }
+            }
+        }
+        let from_disk=fs::read(&path).ok().filter(|bytes|{
+            serde_json::from_slice::<Value>(bytes).ok()
+                .and_then(|v|v.get("machines").and_then(Value::as_array).cloned()).is_some()
+        });
+        if let (Some(t),Some(bytes))=(mtime,from_disk.as_ref()) {
+            if let Ok(mut guard)=state.change_schedule_cache.lock() {
+                *guard=Some((t,bytes.clone()));
+            }
+        }
+        let raw=from_disk.unwrap_or_else(super::change_schedule::empty_weekly_payload_bytes);
+        reply(&mut stream,"200 OK","application/json; charset=utf-8",
+            if method=="HEAD"{&[]}else{&raw},"no-store");
+        return
+    }
     // Versioned Vue bundle. The v0.2.5 updater preserves existing www files:
     // a new versioned directory is copied without replacing the legacy UI.
     let route=path.split('?').next().unwrap_or("");
@@ -644,6 +681,11 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
         "/api/schedule"=>{
             let path=state.data_path.with_file_name("schedule-local.json");
             let bytes=fs::read(path).unwrap_or_else(|_|b"{\"rows\":[],\"from\":null,\"to\":null}".to_vec());
+            ("200 OK","application/json; charset=utf-8",bytes,"no-store")
+        },
+        "/api/change-schedule"=>{
+            let path=state.data_path.with_file_name("change-schedule-week.json");
+            let bytes=fs::read(path).unwrap_or_else(|_|super::change_schedule::empty_weekly_payload_bytes());
             ("200 OK","application/json; charset=utf-8",bytes,"no-store")
         },
         "/api/status"=>{
@@ -758,6 +800,21 @@ mod live_json_tests {
         assert_ne!(json_version(&file).unwrap(),old);
         let _=fs::remove_file(&file);
         let _=fs::remove_dir(&root);
+    }
+
+    #[test]
+    fn change_schedule_version_and_empty_payload_work_offline(){
+        let root=std::env::temp_dir().join(format!("mics-chg-ver-{}",std::process::id()));
+        let _=fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let file=root.join("change-schedule-week.json");
+        assert!(json_version(&file).is_none());
+        let empty: serde_json::Value=serde_json::from_slice(&crate::change_schedule::empty_weekly_payload_bytes()).unwrap();
+        assert_eq!(empty["source"],"mics-only-offline");
+        assert_eq!(empty["days"].as_array().unwrap().len(),7);
+        fs::write(&file,b"{\"ok\":true,\"machines\":[]}").unwrap();
+        assert!(json_version(&file).is_some());
+        let _=fs::remove_dir_all(&root);
     }
 
 }

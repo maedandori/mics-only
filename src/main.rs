@@ -5,6 +5,7 @@ mod credentials;
 mod updater;
 mod local_web;
 mod schedule;
+mod change_schedule;
 mod materials;
 mod mirror;
 use chrono::{DateTime, Utc};
@@ -373,6 +374,11 @@ fn run(c: Config) -> Result<(), String> {
     #[cfg(not(windows))]
     let alias_token=env::var("MICS_COORDINATOR_TOKEN").unwrap_or_default();
     local.set_alias_sync(&c.coordinator_url,&alias_token);
+    if schedule::local_path().is_file(){
+        if let Err(e)=change_schedule::sync_default(){
+            eprintln!("LOCAL_CHANGE_SCHEDULE_INIT_FAILED {e}");
+        }
+    }
     local_web::start(local.clone())?;
     // Fetch alias from D1 in the agent, not from the browser. Works in standby,
     // active and mirror-only modes and never blocks the web UI.

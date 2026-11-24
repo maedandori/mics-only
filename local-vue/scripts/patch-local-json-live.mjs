@@ -46,7 +46,7 @@ export function patchLocalJsonLive(root){
     '      let kind;',
     '      try { kind=JSON.parse(event.data).kind; } catch { return; }',
     "      if (kind==='machines') { void load(); return; }",
-    "      if (kind==='schedule') { void refreshLocalSchedule(true).then(()=>void load()); return; }",
+    "      if (kind==='schedule'||kind==='change-schedule') { void refreshLocalSchedule(true).then(()=>void load()); return; }",
     "      if (kind==='settings') void load();",
     '    }',
    ];
@@ -67,6 +67,7 @@ export function patchLocalJsonLive(root){
     '        if(previous){',
     "          if(next.machines!==previous.machines)onLocalJsonEvent({data:'{\"kind\":\"machines\"}'});",
     "          if(next.schedule!==previous.schedule)onLocalJsonEvent({data:'{\"kind\":\"schedule\"}'});",
+    ...(!isDashboard?["          if(next.change_schedule!==previous.change_schedule)onLocalJsonEvent({data:'{\"kind\":\"change-schedule\"}'});"]:[]),
     "          if(next.aliases!==previous.aliases||next.colors!==previous.colors)onLocalJsonEvent({data:'{\"kind\":\"settings\"}'});",
     '        }',
     '      } catch(err) {',

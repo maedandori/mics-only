@@ -86,6 +86,8 @@ jobs:
         run: node --test local-vue/tests/next-change.test.mjs
       - name: Test local JSON SSE and refresh watchdog wiring
         run: node --test local-vue/tests/json-live-watchdog.test.mjs
+      - name: Test offline 7-day change schedule wiring
+        run: node --test local-vue/tests/weekly-7day-offline.test.mjs
       - name: Test Rust
         run: cargo test
       - name: Compile Windows EXEs
