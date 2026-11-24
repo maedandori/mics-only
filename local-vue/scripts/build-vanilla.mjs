@@ -102,25 +102,27 @@ function renderRefreshClock(){
   const remaining=Number.isFinite(at)?Math.ceil((at-Date.now())/1000):NaN;
   let label='待機中';
   if(!refreshStatus)label='接続確認中';
-  else if((mode==='ACTIVE'||mode==='MIRROR_ONLY')&&Number.isFinite(remaining)){
+  else if((mode==='ACTIVE'||mode==='MIRROR_ONLY'||mode==='STANDBY')&&Number.isFinite(remaining)){
     if(remaining<=0)label='更新中…';
     else {
       const minutes=Math.floor(remaining/60),seconds=String(remaining%60).padStart(2,'0');
       label=(minutes>=60?Math.floor(minutes/60)+'時間'+String(minutes%60).padStart(2,'0')+'分':String(minutes).padStart(2,'0')+':')+seconds+(minutes>=60?'秒':'');
-      if(mode==='MIRROR_ONLY')label='ミラー '+label;
+      if(mode==='MIRROR_ONLY')label='閲覧専用 '+label;
+      if(mode==='STANDBY')label='待機中 '+label;
     }
   }else if(mode==='ACTIVE')label='更新中…';
+  else if(mode==='STANDBY'||mode==='MIRROR_ONLY')label='同期待機中';
   else if(mode==='OFFLINE')label='オフライン';
   refreshButton.textContent='データ更新: '+label;
   const interval=refreshStatus?.poll_interval_seconds;
-  refreshButton.title='クリック: ローカル画面を再読込（Firebirdの強制同期ではありません）'+(interval?' / MICS設定: '+interval+'秒':'')+(mode==='MIRROR_ONLY'?' / ミラーは約5分間隔':'');
+  refreshButton.title='クリック: ローカル画面を再読込（Firebirdの強制同期ではありません）'+(interval?' / MICS設定: '+interval+'秒':'')+(mode==='MIRROR_ONLY'||mode==='STANDBY'?' / 共有データの同期間隔':'');
 }
 async function readRefreshStatus(){
   if(refreshStatusBusy)return;
   refreshStatusBusy=true;
   try{
     const response=await fetch('/api/status',{cache:'no-store'});
-    if(!response.ok)throw Error('Local agent unavailable');
+    if(!response.ok)throw Error('ローカルの実行プログラムに接続できません');
     refreshStatus=await response.json();
   }catch{refreshStatus=null}
   finally{refreshStatusBusy=false;renderRefreshClock()}
@@ -300,7 +302,7 @@ async function load(){
  if(loading)return;loading=true;
  try{
   const [a,b]=await Promise.all([fetch('/data/schedule-local.json',{cache:'no-store'}),fetch('/data/machines.json',{cache:'no-store'})]);
-  if(!a.ok)throw Error('schedule-local.json HTTP '+a.status);
+  if(!a.ok)throw Error('予定データを取得できません（HTTP '+a.status);
   const schedule=await a.json(), machines=b.ok?await b.json():{machines:[]};
   const scheduled=Array.isArray(schedule.rows)?schedule.rows:[];
   const active=Array.isArray(machines.machines)?machines.machines:[];

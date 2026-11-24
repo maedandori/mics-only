@@ -84,7 +84,7 @@ function buildNormalizedSnapshot() {
     lastSchedulesText = lastScheduleText;
   }
   lastNormalized = {machines: machines.slice().sort(compareMachineNo),
-    schedules: lastSchedules, source:'MICS-only direct local JSON',
+    schedules: lastSchedules, source:'ローカル保存データ',
     loadedAt:new Date().toISOString(), live:true};
   normalizedMachineText = lastMachineText;
   normalizedScheduleText = lastScheduleText;
@@ -103,11 +103,11 @@ async function refreshLocalSchedule() {
   scheduleRequestedAt = Date.now();
   schedulePromise = (async () => {
     const response = await fetch('/data/schedule-local.json', {cache: 'no-store'});
-    if (!response.ok) throw new Error('Local schedule JSON HTTP ' + response.status);
+    if (!response.ok) throw new Error('予定データの取得に失敗しました（HTTP ' + response.status);
     const text = await response.text();
     if (text === lastScheduleText) return;
     const parsed = JSON.parse(text);
-    if (!Array.isArray(parsed.rows)) throw new Error('Invalid local schedule JSON rows');
+    if (!Array.isArray(parsed.rows)) throw new Error('予定データの形式が正しくありません。');
     lastScheduleText = text;
     lastScheduleData = parsed;
     lastNormalized = null;
@@ -126,12 +126,12 @@ export async function loadData(waitForSchedule = false) {
   // Do not wait for the potentially large schedule file on Dashboard.
   try {
     const response = await fetch('/data/machines.json', {cache: 'no-store'});
-    if (!response.ok) throw new Error('Local machines JSON HTTP ' + response.status);
+    if (!response.ok) throw new Error('機械データの取得に失敗しました（HTTP ' + response.status);
     const text = await response.text();
     if (text !== lastMachineText) {
       const parsed = JSON.parse(text);
       if (!Array.isArray(parsed.machines) || !parsed.machines.length)
-        throw new Error('Local machines JSON is empty');
+        throw new Error('機械データがありません。');
       lastMachineText = text;
       lastMachineData = parsed;
       lastNormalized = null;
@@ -241,9 +241,9 @@ const statusReadOnly=[
 "}",
 "export async function loadStatusConfig() {",
 "  const r=await fetch('/data/status-colors.json',{cache:'no-store'});",
-"  if(!r.ok)throw new Error('Local status-colors.json HTTP '+r.status);",
+"  if(!r.ok)throw new Error('状態色の取得に失敗しました（HTTP '+r.status);",
 "  const data=await r.json();",
-"  if(!data?.default||!data?.codes)throw new Error('Invalid local status-colors.json');",
+"  if(!data?.default||!data?.codes)throw new Error('状態色の形式が正しくありません。');",
 "  const cfg=normalizeStatusConfig(data);",
 "  if(typeof window!=='undefined')window.MICS_STATUS_COLORS=cfg;",
 "  return cfg;",
@@ -488,9 +488,9 @@ let statusUi=readFileSync(statusPage,'utf8');
 statusUi=statusUi.replaceAll('vue/data/status-colors.json','data/status-colors.json');
 statusUi=statusUi.replace(
  '変更は <b>data/status-colors.json</b> に自動保存され、全画面に即時反映されます。',
- '表示色は <b>data/status-colors.json</b> から読み込みます。変更は Machine-Controlで保存し、D1 → Local 同期してください。');
+ '表示色は <b>data/status-colors.json</b> から読み込みます。変更は Machine-Controlで保存し、共有データベース → ローカル 同期してください。');
 statusUi=statusUi.replace('💾 status-colors.json に保存','🔒 読み取り専用');
-statusUi=statusUi.replace('@click="saveToFile"','disabled title="D1 → Local 同期専用"');
+statusUi=statusUi.replace('@click="saveToFile"','disabled title="共有データベース → ローカル 同期専用"');
 writeFileSync(statusPage,statusUi);
 
 

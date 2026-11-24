@@ -4,9 +4,11 @@ name: Build and release MICS Only portable
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 concurrency:
-  group: mics-only-windows-release
+  group: mics-only-windows-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   build:
@@ -88,6 +90,8 @@ jobs:
         run: node --test local-vue/tests/json-live-watchdog.test.mjs
       - name: Test offline 7-day change schedule wiring
         run: node --test local-vue/tests/weekly-7day-offline.test.mjs
+      - name: Test Japanese interface labels
+        run: node --test local-vue/tests/japanese-ui.test.mjs
       - name: Test Rust
         run: cargo test
       - name: Compile Windows EXEs

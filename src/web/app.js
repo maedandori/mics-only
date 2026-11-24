@@ -42,7 +42,7 @@ function render(data,status){
  const stamp=t&&!isNaN(t)?"更新: "+t.toLocaleString("ja-JP"):"保存データなし";
  el("updated").textContent=stamp;el("menu-updated").textContent=stamp;
  const stale=t&&Date.now()-t.getTime()>120000&&status.mode!=="ACTIVE";
- el("banner").textContent=!machines.length?"保存されたデータはありません。Agent が ACTIVE になると更新されます。":stale?"注意: 最終データは2分以上前です。表示は保存された情報です。":"";
+ el("banner").textContent=!machines.length?"保存されたデータはありません。予備機が稼働すると更新されます。":stale?"注意: 最終データは2分以上前です。表示は保存された情報です。":"";
 }
 function stored(k,d){try{return localStorage.getItem(k)??d}catch{return d}}
 function save(k,v){try{localStorage.setItem(k,v)}catch{}}
@@ -70,8 +70,8 @@ async function refresh(){
    fetch("/api/machines",{cache:"no-store"}).then(r=>{if(!r.ok)throw Error(r.status);return r.json()}),
    fetch("/api/status",{cache:"no-store"}).then(r=>{if(!r.ok)throw Error(r.status);return r.json()})
   ]);
-  render(data,status);el("server-mode").textContent=status.mode||"UNKNOWN";el("connection").textContent="LOCAL OK";
- }catch(e){el("connection").textContent="OFFLINE";el("banner").textContent="ローカルサーバーに接続できません。最後の画面を表示しています。"}
+  render(data,status);el("server-mode").textContent=({ACTIVE:"稼働中",STANDBY:"待機中",MIRROR_ONLY:"閲覧専用",OFFLINE:"未接続"}[status.mode]||"不明");el("connection").textContent="接続中";
+ }catch(e){el("connection").textContent="未接続";el("banner").textContent="ローカルサーバーに接続できません。最後の画面を表示しています。"}
 }
 refresh();setInterval(refresh,3000);
 if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>{});
