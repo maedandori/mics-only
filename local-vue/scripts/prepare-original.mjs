@@ -103,7 +103,7 @@ async function refreshLocalSchedule() {
   scheduleRequestedAt = Date.now();
   schedulePromise = (async () => {
     const response = await fetch('/data/schedule-local.json', {cache: 'no-store'});
-    if (!response.ok) throw new Error('予定データの取得に失敗しました（HTTP ' + response.status);
+    if (!response.ok) throw new Error('予定データの取得に失敗しました：HTTP ' + response.status);
     const text = await response.text();
     if (text === lastScheduleText) return;
     const parsed = JSON.parse(text);
@@ -126,7 +126,7 @@ export async function loadData(waitForSchedule = false) {
   // Do not wait for the potentially large schedule file on Dashboard.
   try {
     const response = await fetch('/data/machines.json', {cache: 'no-store'});
-    if (!response.ok) throw new Error('機械データの取得に失敗しました（HTTP ' + response.status);
+    if (!response.ok) throw new Error('機械データの取得に失敗しました：HTTP ' + response.status);
     const text = await response.text();
     if (text !== lastMachineText) {
       const parsed = JSON.parse(text);
@@ -241,7 +241,7 @@ const statusReadOnly=[
 "}",
 "export async function loadStatusConfig() {",
 "  const r=await fetch('/data/status-colors.json',{cache:'no-store'});",
-"  if(!r.ok)throw new Error('状態色の取得に失敗しました（HTTP '+r.status);",
+"  if(!r.ok)throw new Error('状態色の取得に失敗しました：HTTP '+r.status);",
 "  const data=await r.json();",
 "  if(!data?.default||!data?.codes)throw new Error('状態色の形式が正しくありません。');",
 "  const cfg=normalizeStatusConfig(data);",
@@ -289,7 +289,7 @@ replaceDashboard('日程データ (mics_schedule_week) がありません。',
 const loadStart=dashboard.indexOf('    async function load(file = null) {');
 const loadEnd=dashboard.indexOf('    function onStorage(e) {',loadStart);
 if(loadStart<0||loadEnd<=loadStart)throw Error('Original dashboard load function not found');
-const optimizedLoad="    let configLoading = false, lastConfigFingerprint = '';\n    async function refreshConfiguration() {\n      if (configLoading) return;\n      configLoading = true;\n      try {\n        const [cfg, aliasCfg] = await Promise.all([loadStatusConfig(), loadAliasConfig()]);\n        const fingerprint = JSON.stringify([cfg, aliasCfg]);\n        if (fingerprint !== lastConfigFingerprint) {\n          lastConfigFingerprint = fingerprint;\n          state.cfg = cfg;\n          state.aliasCfg = aliasCfg;\n        }\n      } catch (error) {\n        console.warn('Local settings retained:', error);\n      } finally { configLoading = false; }\n    }\n    let loadBusy = false;\n    async function load(file = null) {\n      if (loadBusy) return;\n      loadBusy = true;\n      // Do not hide existing nodes while polling unchanged JSON.\n      if (!state.data) state.sourceText = '読み込み中…';\n      if (state.errorMsg) state.errorMsg = '';\n      // The tiny machine JSON takes priority; settings load in parallel.\n      void refreshConfiguration();\n      try {\n        const data = await (file ? loadFromFile(file) : loadData(state.view === 'gantt'));\n        if (data !== state.data) {\n          state.data = data;\n          state.sourceText = data.source + ' · ' + fmtDT(new Date(data.loadedAt));\n        }\n        clearInterval(refreshTimer);\n        if (data.live) refreshTimer = setInterval(() => load(), 60000);\n        if (file) pushToast(file.name + ' を読み込みました', 'ok');\n      } catch (e) {\n        console.error(e);\n        state.sourceText = '読み込みエラー';\n        state.errorMsg = e.message;\n        pushToast(e.message, 'err');\n      } finally { loadBusy = false; }\n    }\n";
+const optimizedLoad="    let configLoading = false, lastConfigFingerprint = '';\n    async function refreshConfiguration() {\n      if (configLoading) return;\n      configLoading = true;\n      try {\n        const [cfg, aliasCfg] = await Promise.all([loadStatusConfig(), loadAliasConfig()]);\n        const fingerprint = JSON.stringify([cfg, aliasCfg]);\n        if (fingerprint !== lastConfigFingerprint) {\n          lastConfigFingerprint = fingerprint;\n          state.cfg = cfg;\n          state.aliasCfg = aliasCfg;\n        }\n      } catch (error) {\n        console.warn('Local settings retained:', error);\n      } finally { configLoading = false; }\n    }\n    let loadBusy = false;\n    async function load(file = null) {\n      if (loadBusy) return;\n      loadBusy = true;\n      // Do not hide existing nodes while polling unchanged JSON.\n      if (!state.data) state.sourceText = '読み込み中…';\n      if (state.errorMsg) state.errorMsg = '';\n      // The tiny machine JSON takes priority; settings load in parallel.\n      void refreshConfiguration();\n      try {\n        const data = await (file ? loadFromFile(file) : loadData(state.view === 'gantt'));\n        if (data !== state.data) {\n          state.data = data;\n          state.sourceText = data.source + ' · ' + fmtDT(new Date(data.loadedAt));\n        }\n        clearInterval(refreshTimer);\n        if (data.live) refreshTimer = setInterval(() => load(), 60000);\n        if (file) pushToast(file.name + ' を読み込みました', 'ok');\n      } catch (e) {\n        console.error(e);\n        state.sourceText = '読み込みエラー';\n        state.errorMsg = 'データの読み込みに失敗しました。';\n        pushToast(state.errorMsg, 'err');\n      } finally { loadBusy = false; }\n    }\n";
 dashboard=dashboard.slice(0,loadStart)+optimizedLoad+dashboard.slice(loadEnd);
 const scheduleReadyHandler="    function onLocalScheduleReady() { if (state.view === 'grid' || state.view === 'table') void load(); }\n";
 const handlerTarget='    function onStorage(e) {';

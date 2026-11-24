@@ -8,8 +8,8 @@ fn main() {
     use native_windows_gui as nwg;
     use std::{cell::RefCell, collections::BTreeMap, fs, path::PathBuf, process::Command, rc::Rc, sync::mpsc, thread};
     use std::os::windows::process::CommandExt;
-    nwg::init().expect("Cannot initialize Windows GUI");
-    nwg::Font::set_global_family("Segoe UI").expect("Font error");
+    nwg::init().expect("設定画面を初期化できません。");
+    nwg::Font::set_global_family("Meiryo UI").expect("フォントを設定できません。");
 
     let home = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."));
@@ -41,7 +41,7 @@ fn main() {
     let mut window=nwg::Window::default();
     nwg::Window::builder().size((1000,710)).position((90,35))
         .title("MICS-only｜設定")
-        .build(&mut window).expect("Window error");
+        .build(&mut window).expect("設定画面を作成できません。");
 
     // Fixed layout with two clearly separated functional columns.
     let mut section_labels=Vec::<nwg::Label>::new();
@@ -282,7 +282,11 @@ fn main() {
             if query {cmd.arg("--sql-query").arg(&path);}else{cmd.arg("--dump-tables");}
             let output=cmd.creation_flags(0x08000000).output();
             match output {
-                Ok(out)=>sql_output.set_text(&format!("{}\n{}",String::from_utf8_lossy(&out.stdout),String::from_utf8_lossy(&out.stderr))),
+                Ok(out) if out.status.success()=>{
+                    let data=String::from_utf8_lossy(&out.stdout);
+                    sql_output.set_text(&format!("実行完了\r\n{}",if data.trim().is_empty(){"該当データはありません。"}else{data.trim()}));
+                },
+                Ok(_)=>sql_output.set_text("実行に失敗しました。SQL 文、接続設定、認証情報をご確認ください。"),
                 Err(e)=>sql_output.set_text(&format!("実行プログラムを起動できませんでした。"))
             }
         }
@@ -535,7 +539,7 @@ fn main() {
                         Err(err) => { nwg::error_message("MICS-only", &format!("設定を保存しましたが、起動に失敗しました。")); },
                     }
                 },
-                Err(e)=>{report_error(&e);nwg::error_message("設定","保存に失敗しました。入力内容を確認してください。詳細は設定ログに記録しました。");},
+                Err(e)=>{report_error(&e);let message=if e.chars().any(|c|matches!(c,'\u{3040}'..='\u{30ff}'|'\u{4e00}'..='\u{9fff}')){e.as_str()}else{"保存に失敗しました。入力内容を確認してください。詳細は設定ログに記録しました。"};nwg::error_message("設定",message);},
             }
         }
     });

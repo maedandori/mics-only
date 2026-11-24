@@ -302,7 +302,7 @@ async function load(){
  if(loading)return;loading=true;
  try{
   const [a,b]=await Promise.all([fetch('/data/schedule-local.json',{cache:'no-store'}),fetch('/data/machines.json',{cache:'no-store'})]);
-  if(!a.ok)throw Error('予定データを取得できません（HTTP '+a.status);
+  if(!a.ok)throw Error('予定データを取得できません：HTTP '+a.status);
   const schedule=await a.json(), machines=b.ok?await b.json():{machines:[]};
   const scheduled=Array.isArray(schedule.rows)?schedule.rows:[];
   const active=Array.isArray(machines.machines)?machines.machines:[];
