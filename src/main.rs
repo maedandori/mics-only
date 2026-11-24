@@ -15,6 +15,15 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, env, fs, net::{TcpStream,ToSocketAddrs}, thread, time::Duration};
 
+// Local schedule refresh is independent of cloud writes and lease heartbeats.
+const ACTIVE_SCHEDULE_SECONDS: u64 = 20;
+const STANDBY_MIRROR_SECONDS: u64 = 100;
+const PRESENCE_SECONDS: u64 = 60;
+
+fn remaining_poll_seconds(last: Option<std::time::Instant>, interval: u64) -> u64 {
+    last.map(|at| interval.saturating_sub(at.elapsed().as_secs()).max(1)).unwrap_or(1)
+}
+
 #[derive(Debug)]
 struct Config {
     enabled: bool, agent_id: String, host: String, port: u16,
@@ -366,7 +375,8 @@ fn remote_update_request(response:&Value,local:&local_web::LocalState){
 fn run(c: Config) -> Result<(), String> {
     // Always serve the local dashboard, even when standby is disabled or lease denied.
     let local=local_web::LocalState::new(local_web::default_snapshot_path());
-    local.set_poll_interval(c.interval);
+    let active_poll_seconds=c.interval.min(ACTIVE_SCHEDULE_SECONDS);
+    local.set_poll_interval(active_poll_seconds);
     // Alias settings use shared D1; local machine/schedule API remains entirely local.
     // The coordinator secret is read from DPAPI and never exposed to browser JS.
     #[cfg(windows)]
@@ -425,28 +435,31 @@ fn run(c: Config) -> Result<(), String> {
         let valid_url=url::Url::parse(&c.coordinator_url).ok()
             .is_some_and(|u|u.scheme()=="https"&&u.host_str().is_some()
                 &&u.username()==""&&u.password().is_none());
-        let mut last_mirror=std::time::Instant::now()-Duration::from_secs(301);
+        let mut last_mirror:Option<std::time::Instant>=None;
+        let mut last_presence:Option<std::time::Instant>=None;
+        local.set_poll_interval(STANDBY_MIRROR_SECONDS);
         loop {
-            if valid_url&&!presence_secret.is_empty(){
+            if valid_url&&!presence_secret.is_empty()&&last_presence.map(|t|t.elapsed()>=Duration::from_secs(PRESENCE_SECONDS)).unwrap_or(true){
+                last_presence=Some(std::time::Instant::now());
                 if let Ok(response)=presence(&c,&presence_secret,local.alias_sync_ack.lock().ok().and_then(|ack|*ack)){
                     remote_alias_sync_request(&response,&local);
                     #[cfg(windows)]
                     remote_update_request(&response,&local);
                 }
             }
-            if last_mirror.elapsed()>=Duration::from_secs(300) {
-                last_mirror=std::time::Instant::now();
+            if last_mirror.map(|t|t.elapsed()>=Duration::from_secs(STANDBY_MIRROR_SECONDS)).unwrap_or(true){
+                last_mirror=Some(std::time::Instant::now());
                 local.schedule_next_poll(None);
                 if valid_url&&!mirror_secret.is_empty(){
                     if let Err(e)=mirror::refresh(&c,&mirror_secret,&local){
                         eprintln!("MIRROR_ONLY_CACHE_ERROR {e}");
                     }
                 }
-                // Mirror-only snapshots are read at a separate, fixed 5-minute cadence.
-                // Do not claim the Settings interval controls this standby mode.
-                local.schedule_next_poll(if valid_url&&!mirror_secret.is_empty(){Some(300)}else{None});
             }
-            thread::sleep(Duration::from_secs(60))
+            let mirror_wait=remaining_poll_seconds(last_mirror,STANDBY_MIRROR_SECONDS);
+            local.schedule_next_poll(if valid_url&&!mirror_secret.is_empty(){Some(mirror_wait)}else{None});
+            let presence_wait=if valid_url&&!presence_secret.is_empty(){remaining_poll_seconds(last_presence,PRESENCE_SECONDS)}else{STANDBY_MIRROR_SECONDS};
+            thread::sleep(Duration::from_secs(mirror_wait.min(presence_wait)))
         }
     }
     // Read secrets once; never print secrets or raw employee/snapshot data.
@@ -480,9 +493,13 @@ fn run(c: Config) -> Result<(), String> {
             }
             last_presence=Some(std::time::Instant::now());
         }
+        let mut next_wait=active_poll_seconds;
+        let mut next_data_wait=active_poll_seconds;
         match acquire(&c, &coordinator_token) {
             Ok(Some(lease)) => {
                 local.set_mode("ACTIVE");
+                local.set_poll_interval(active_poll_seconds);
+                last_mirror=None;
                 let material_refresh_seconds=if materials_sync_failed {300}else{86400};
                 if materials_polled_at.map(|t|t.elapsed()>=Duration::from_secs(material_refresh_seconds)).unwrap_or(true){
                     materials_polled_at=Some(std::time::Instant::now());
@@ -497,7 +514,7 @@ fn run(c: Config) -> Result<(), String> {
                         }
                     }
                 }
-                if schedule_polled_at.map(|t|t.elapsed()>=Duration::from_secs(60)).unwrap_or(true){
+                if schedule_polled_at.map(|t|t.elapsed()>=Duration::from_secs(ACTIVE_SCHEDULE_SECONDS)).unwrap_or(true){
                     // A valid coordinator lease is required before opening Firebird
                     // even for the local-only schedule cache.
                     if let Ok(Some(grant))=acquire(&c,&coordinator_token){
@@ -567,23 +584,29 @@ fn run(c: Config) -> Result<(), String> {
                     }
                     Err(e) => {local.record_sync("READ_FAILED");eprintln!("MICS_READ_FAILED {e}");},
                 }
+                next_wait=active_poll_seconds.min(remaining_poll_seconds(schedule_polled_at,ACTIVE_SCHEDULE_SECONDS));
+                next_data_wait=next_wait;
             }
             Ok(None) => {
                 local.set_mode("STANDBY");
+                local.set_poll_interval(STANDBY_MIRROR_SECONDS);
                 previous_hash.clear();
                 previous_cloud_state.clear();
-                if last_mirror.map(|t|t.elapsed()>Duration::from_secs(300)).unwrap_or(true){
+                schedule_polled_at=None;
+                if last_mirror.map(|t|t.elapsed()>=Duration::from_secs(STANDBY_MIRROR_SECONDS)).unwrap_or(true){
                     last_mirror=Some(std::time::Instant::now());
                     if let Err(e)=mirror::refresh(&c,&sync_token,&local){
                         eprintln!("STANDBY_LOCAL_MIRROR_FAILED {e}");
                     }
                 }
+                next_data_wait=remaining_poll_seconds(last_mirror,STANDBY_MIRROR_SECONDS);
+                // Keep the lease election cadence independent of mirror downloads.
+                next_wait=active_poll_seconds.min(next_data_wait);
             }
-            Err(e) => { local.set_mode("OFFLINE"); previous_hash.clear(); previous_cloud_state.clear(); eprintln!("{e}"); }
+            Err(e) => { local.set_mode("OFFLINE"); previous_hash.clear(); previous_cloud_state.clear(); schedule_polled_at=None; last_mirror=None; eprintln!("{e}"); }
         }
-        // Schedule from the END of the work, matching the real sleep/cycle logic.
-        local.schedule_next_poll(Some(c.interval));
-        thread::sleep(Duration::from_secs(c.interval));
+        local.schedule_next_poll(Some(next_data_wait));
+        thread::sleep(Duration::from_secs(next_wait));
     }
 }
 fn test_connection(c:&Config)->Result<(),String>{
@@ -780,5 +803,20 @@ mod tests {
         let mut m1_order_change = m1.clone();
         m1_order_change["order_no"] = json!("ORD-2");
         assert_eq!(changed_cloud_machines(&[m1_order_change], &state, t0 + 5_000).len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod polling_interval_tests {
+    use super::*;
+    use std::time::Instant;
+    #[test]
+    fn active_and_standby_refresh_targets() {
+        assert_eq!(ACTIVE_SCHEDULE_SECONDS,20);
+        assert_eq!(STANDBY_MIRROR_SECONDS,100);
+        assert_eq!(remaining_poll_seconds(None,20),1);
+        assert_eq!(remaining_poll_seconds(Some(Instant::now()-Duration::from_secs(10)),20),10);
+        assert_eq!(remaining_poll_seconds(Some(Instant::now()-Duration::from_secs(80)),100),20);
+        assert_eq!(remaining_poll_seconds(Some(Instant::now()-Duration::from_secs(101)),100),1);
     }
 }
