@@ -113,7 +113,10 @@ pub fn collect(c:&super::Config,password:&str)->Result<Value,String>{
 }
 
 pub fn upload_if_changed(c:&super::Config,token:&str,grant:&super::Lease,cache:&Value)->Result<bool,String>{
-    let from=cache["from"].as_str().ok_or("Missing schedule from")?;
+    // Stable daily JST boundary prevents needless writes on each poll.
+    let jst=FixedOffset::east_opt(9*3600).expect("JST");
+    let from_owned=Utc::now().with_timezone(&jst).date_naive().and_hms_opt(0,0,0).expect("day start").format("%Y-%m-%d %H:%M:%S").to_string();
+    let from=from_owned.as_str();
     let to=chrono::NaiveDateTime::parse_from_str(from,"%Y-%m-%d %H:%M:%S")
         .map_err(|e|e.to_string())?+chrono::Duration::days(14);
     let to=to.format("%Y-%m-%d %H:%M:%S").to_string();

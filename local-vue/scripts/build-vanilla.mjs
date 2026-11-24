@@ -192,7 +192,7 @@ function showDetails(r){
  +'<label style="font-size:12px;font-weight:700">取り数 (個/ショット)<input id="mics-material-pick-qty" type="number" min="1" step="1" inputmode="numeric" value="'+esc(r.pick_qty??'')+'" placeholder="取り数を入力" style="display:block;box-sizing:border-box;width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px;margin-top:4px"></label></div>'
  +(r.remaining_from_live?'<small style="display:block;color:#64748b;margin:-3px 0 10px">MICSの残数 = 予定数 − 良品数（編集可能）</small>':'')
   +'<div id="mics-material-calculation" aria-live="polite" style="padding:10px 12px;border-radius:8px;background:#eff6ff;color:#1e3a8a;font-size:13px;margin-bottom:8px"></div>'
- +(canCalc?'<small style="display:block;margin-bottom:12px;color:#64748b">残数から計算。WEIGHTはランナー込みの1個重量(g)。ショット数を切り上げてkgを算出。配合率で原料別に按分した推定値です。</small>':'<p style="color:#64748b;margin-bottom:8px">配合比率データなし（合計重量は計算できます）</p>')
+ +(canCalc?'<small style="display:block;margin-bottom:12px;color:#64748b">残数から計算。WEIGHTはランナー込みの1個重量(g)。残数×1個重量でkgを算出。配合率で原料別に按分した推定値です。</small>':'<p style="color:#64748b;margin-bottom:8px">配合比率データなし（合計重量は計算できます）</p>')
  +materials+'</div></section>';
  details.hidden=false;
  details.style.display='flex';
