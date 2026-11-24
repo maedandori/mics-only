@@ -37,21 +37,31 @@ export function patchNextChange(root){
   '}',
   ''
  ].join('\n');
- s=s.slice(0,a)+classifier+s.slice(b);
+ const scheduledTime=[
+  'function micsScheduledChangeAt(row){',
+  " const raw=String(row?.start_at??'').trim();",
+  ' if(!raw)return null;',
+  " const iso=raw.replace(' ','T');",
+  " const explicit=/(?:Z|[+-]\\d{2}:?\\d{2})$/i.test(iso);",
+  " const ms=Date.parse(explicit?iso:iso+'+09:00');",
+  ' return Number.isFinite(ms)?new Date(ms):null;',
+  '}',
+  ''
+ ].join('\n');
+ s=s.slice(0,a)+classifier+scheduledTime+s.slice(b);
  s=once(s,'void refreshLocalSchedule().then(() => {','void refreshLocalSchedule(true).then(() => {','SSE force');
  const oldEta=[
   '  if (change && change.row && etaSec != null) {',
   '    changeSec = etaSec + change.between;',
   '    changeAt = sampled ? new Date(sampled.getTime() + changeSec * 1000) : null;',
   '  }'].join('\n');
+ // MICS owns the schedule. MSTART is Japan-local; do not overwrite it with a separate cycle forecast.
  const newEta=[
-  "  if(change?.row&&['200','210'].includes(String(m.status_code))&&m.qty_remaining!=null",
-  '     &&m.pick_qty!=null&&m.cycle_seconds!=null&&cyc>0&&pick>0&&Number.isFinite(remaining)',
-  '     &&remaining>=0&&sampled&&sampled.getTime()<=Date.now()+60000',
-  '     &&Date.now()-sampled.getTime()<=120000){',
-  '    changeSec=Math.ceil(remaining/pick)*cyc+Math.max(0,Number(change.between)||0);',
-  '    changeAt=new Date(Date.now()+changeSec*1000);',
-  '  }'].join('\n');
+  '  if (change?.row) {',
+  '    changeAt = micsScheduledChangeAt(change.row);',
+  '    changeSec = changeAt ? Math.max(0,(changeAt.getTime()-Date.now())/1000) : null;',
+  '  }'
+ ].join('\n');
  s=once(s,oldEta,newEta,'ETA');
  const start=s.indexOf('              <div class="sec-border border-t pt-1.5 mt-1.5">');
  const stop=s.indexOf('            </article>',start);
@@ -69,7 +79,7 @@ export function patchNextChange(root){
   '                  </div>',
   ''].join('\n');
  // Use a two-line compact next-change display, matching the online machine node.
- // Keep the original change detection and ETA computation above unchanged.
+ // Display the original MICS schedule timestamp for all machine statuses.
  const compact=[
   '              <div class="sec-border border-t pt-1.5 mt-1.5 mics-next-compact">',
   '                <template v-if="metricsByMachine[m.machine_no].change?.row">',
@@ -77,7 +87,7 @@ export function patchNextChange(root){
   '                    <span class="mics-next-title">次の変更</span>',
   '                    <span class="mics-next-head-right">',
   '                      <span v-for="(type,idx) in (metricsByMachine[m.machine_no].change.types || [])" :key="idx" class="mics-next-tag" :class="type === \'型替え\' ? \'mold\' : \'color\'">{{ type }}</span>',
-  '                      <b class="mics-next-time">· {{ fmtDT(metricsByMachine[m.machine_no].changeAt || metricsByMachine[m.machine_no].change.row.start_at,true,false) }}</b>',
+  '                      <b class="mics-next-time" title="MICS予定時刻">· {{ fmtDT(metricsByMachine[m.machine_no].changeAt || metricsByMachine[m.machine_no].change.row.start_at,true,false) }}</b>',
    '                      <span class="mics-next-remain" :data-mics-target="metricsByMachine[m.machine_no].changeAt ? metricsByMachine[m.machine_no].changeAt.toISOString() : metricsByMachine[m.machine_no].change.row.start_at"></span>',
   '                    </span>',
   '                  </div>',

@@ -51,7 +51,8 @@ test('node shows change type, predicted/scheduled time, next product, and reuses
  assert.ok(dashboard.includes('次の品番'))
  assert.ok(dashboard.includes("types.push('品番替え')"))
  assert.ok(dashboard.includes('refreshLocalSchedule(true)'))
- assert.ok(dashboard.includes("m.qty_remaining!=null"))
+ assert.ok(dashboard.includes('changeAt = micsScheduledChangeAt(change.row)'))
+ assert.ok(!dashboard.includes('changeAt=new Date(Date.now()+changeSec*1000)'))
  assert.ok(!dashboard.includes("fetch('/api/mics/machines'"))
 })
 
@@ -77,4 +78,16 @@ test('machine cards count down every minute in JST using predicted or scheduled 
  assert.equal(scheduled.textContent,'(あと12時間39分)')
  now=Date.parse('2026-11-19T00:25:00+09:00');intervals[0]()
  assert.equal(scheduled.textContent,'(予定時刻経過)')
+})
+
+test('next-change time comes from MICS MSTART in JST, not remaining quantity or browser time',()=>{
+ const start=dashboard.indexOf('function micsScheduledChangeAt(')
+ const end=dashboard.indexOf('\nfunction calcMetrics(',start)
+ assert.ok(start>=0&&end>start)
+ const scheduledAt=new Function(dashboard.slice(start,end)+'\nreturn micsScheduledChangeAt;')()
+ assert.equal(scheduledAt({start_at:'2026-11-25 09:50:00'}).toISOString(),'2026-11-25T00:50:00.000Z')
+ assert.equal(scheduledAt({start_at:'2026-11-26 00:10:00'}).toISOString(),'2026-11-25T15:10:00.000Z')
+ assert.equal(scheduledAt({start_at:'2026-11-25T09:50:00+09:00',qty_remaining:999999,cycle_seconds:200}).toISOString(),'2026-11-25T00:50:00.000Z')
+ assert.equal(scheduledAt({start_at:'invalid'}),null)
+ assert.equal(scheduledAt({}),null)
 })
