@@ -80,9 +80,9 @@ const dashboard=location.pathname==='/'||location.pathname.endsWith('/index.html
 // A single unit's WEIGHT is grams including its share of the runner.
 function materialEstimate(qtyRaw,pickRaw,weightRaw){
  const qty=Number(qtyRaw),pick=Number(pickRaw),grams=Number(weightRaw);
- if(qtyRaw==null||pickRaw==null||weightRaw==null||String(qtyRaw).trim()===''||String(pickRaw).trim()===''||String(weightRaw).trim()==='')return null;
- if(!Number.isSafeInteger(qty)||qty<0||!Number.isSafeInteger(pick)||pick<=0||!Number.isFinite(grams)||grams<=0)return null;
- const shots=Math.ceil(qty/pick),produced=shots*pick,totalKg=produced*grams/1000;
+ if(qtyRaw==null||weightRaw==null||String(qtyRaw).trim()===''||String(weightRaw).trim()==='')return null;
+ if(!Number.isSafeInteger(qty)||qty<0||!Number.isFinite(grams)||grams<=0)return null;
+ const shots=Number.isSafeInteger(pick)&&pick>0?Math.ceil(qty/pick):null,produced=qty,totalKg=qty*grams/1000;
  if(!Number.isSafeInteger(produced)||!Number.isFinite(totalKg)||totalKg<0)return null;
  return {qty,pick,grams,shots,produced,totalKg};
 }
@@ -201,8 +201,8 @@ function showDetails(r){
   const result=materialEstimate(remainingInput?.value,pickInput?.value,r.part_weight_raw);
   const summary=$('#mics-material-calculation',details);
   if(summary)summary.textContent=result
-   ?'必要原料重量: '+formatKg(result.totalKg)+' / '+result.shots.toLocaleString('ja-JP')+' ショット × '+result.pick+' 個 = '+result.produced.toLocaleString('ja-JP')+' 個'+(result.produced>result.qty?' (残数より '+(result.produced-result.qty)+' 個多く成形)':'')
-   :'必要重量: 計算不可（WEIGHT・残数・取り数を確認してください）';
+   ?'必要原料重量: '+formatKg(result.totalKg)+' / '+result.qty.toLocaleString('ja-JP')+' 個 × '+result.grams+' g/個'
+   :'必要重量: 計算不可（WEIGHT・残数を確認してください）';
   details.querySelectorAll('[data-mics-weight-pct]').forEach(node=>{
    const raw=node.dataset.micsWeightPct,pct=Number(raw);
    node.textContent=result&&canCalc&&raw!==''&&Number.isFinite(pct)?formatKg(result.totalKg*pct/100):'—';
@@ -311,7 +311,7 @@ async function load(){
   const activeByOrder=new Map(active.filter(m=>m.order_no&&m.status_code!=='AMBIGUOUS').map(m=>[machineKey(m)+'|'+String(m.order_no),m]));
   rows=scheduled.map(r=>{
    const m=activeByOrder.get(machineKey(r)+'|'+String(r.order_no??''));
-   return m?{...r,qty_plan:m.qty_plan??r.qty_plan,qty_remaining:m.qty_remaining??r.qty_remaining,pick_qty:m.pick_qty??r.pick_qty,remaining_from_live:m.qty_remaining!=null}:r;
+   return m?{...r,qty_plan:m.qty_plan??r.qty_plan,qty_remaining:r.qty_remaining??m.qty_remaining,pick_qty:m.pick_qty??r.pick_qty,remaining_from_live:r.qty_remaining==null&&m.qty_remaining!=null}:r;
   });
   for(const m of active)if(m.order_no&&!known.has(machineKey(m)+'|'+String(m.order_no)))rows.unshift({...m,start_at:m.start_at||m.started_at||'',end_at:m.end_at||m.scheduled_end_at||''});
   render();
