@@ -33,7 +33,7 @@ fn read(host:&str,port:u16,db_name:&str,user:&str,password:&str,first:&str,end:&
   "SELECT TRIM(RDB$FIELD_NAME) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='SCHEDULE'",()
  ).map_err(|e|e.to_string())?;
  let known:BTreeSet<String>=fields.into_iter().map(|(f,)|f.to_ascii_uppercase()).collect();
- for field in ["MACHINENO","MACHINESEQ","MORDERNO","PARTSNO","PARTSNAME","TOOLENTRYNO","MSTART","MEND","DELETEFLG"]{
+ for field in ["MACHINENO","MACHINESEQ","MORDERNO","PARTSNO","PARTSNAME","TOOLENTRYNO","MSTART","MEND","DELETEFLG","CALCQTYMREMAIN"]{
   if !known.contains(field){return Err(format!("SCHEDULE missing {field}; keeping previous D1 snapshot"))}
  }
  let color=if known.contains("COLORNAME"){"S.COLORNAME"}else if known.contains("COLOR"){"S.COLOR"}else{"NULL"};
@@ -48,17 +48,17 @@ fn read(host:&str,port:u16,db_name:&str,user:&str,password:&str,first:&str,end:&
   COALESCE(TRIM(CAST(T.TOOLNAME AS VARCHAR(255))),''), \
   COALESCE(TRIM(CAST({color} AS VARCHAR(100))),''), \
   COALESCE(TRIM(CAST(S.MSTART AS VARCHAR(40))),''), \
-  COALESCE(TRIM(CAST(S.MEND AS VARCHAR(40))), '') \
+  COALESCE(TRIM(CAST(S.MEND AS VARCHAR(40))), ''), COALESCE(TRIM(CAST(S.CALCQTYMREMAIN AS VARCHAR(40))), '') \
   FROM SCHEDULE S LEFT JOIN TOOL T ON T.ENTRYNO=S.TOOLENTRYNO \
   WHERE COALESCE(S.DELETEFLG,0)=0 AND S.MACHINENO IN (5,6,7,8,10,11,12,13,14,15,16,17,18,19) \
   AND S.MSTART < TIMESTAMP '{end}' AND (S.MEND >= TIMESTAMP '{first}' OR S.MSTART >= TIMESTAMP '{first}') \
   ORDER BY S.MACHINENO,S.MSTART,S.MACHINESEQ,S.MORDERNO");
- let rows:Vec<(String,String,String,String,String,String,String,String,String,String,String)>=db.query(&sql,()).map_err(|e|e.to_string())?;
+ let rows:Vec<(String,String,String,String,String,String,String,String,String,String,String,String)>=db.query(&sql,()).map_err(|e|e.to_string())?;
  if rows.len()>20000{return Err("Schedule exceeds local cache limit".into())}
  let mut out=Vec::new();
  let materials=super::materials::schedule_material_profiles();
  let mut mapped=0usize;
- for (machine,sequence,order,product,parts_no,entry,mold_no,mold_name,color,start,end) in rows{
+ for (machine,sequence,order,product,parts_no,entry,mold_no,mold_name,color,start,end,remaining) in rows{
   let number=machine.parse::<i32>().map_err(|_|"Invalid machine number")?;
   if !MACHINES.contains(&number){return Err("Unexpected machine number".into())}
   let profile=materials.get(&parts_no);
@@ -67,7 +67,7 @@ fn read(host:&str,port:u16,db_name:&str,user:&str,password:&str,first:&str,end:&
   let part_weight_raw=profile.and_then(|p|p.part_weight_raw.clone());
   if !material_names.is_empty(){mapped+=1;}
   out.push(json!({"machine_no":number,"sequence":sequence,"order_no":order,
-   "parts_no":parts_no,"material_names":material_names,
+   "parts_no":parts_no,"qty_remaining":remaining.trim().parse::<i64>().ok().filter(|n|*n>=0),"material_names":material_names,
    "material_details":material_details,"part_weight_raw":part_weight_raw,
    "product_name":product,"tool_entry_no":entry,"mold_no":mold_no,
    "mold_name":mold_name,"color":color,"start_at":normalize_time(&start)?,
