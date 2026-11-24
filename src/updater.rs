@@ -43,14 +43,14 @@ pub fn install_if_available(exe:&Path)->Result<String,String>{
  install_with_progress(exe,|_,_|{})
 }
 pub fn install_with_progress(exe:&Path,mut progress:impl FnMut(u32,&str))->Result<String,String>{
- progress(2,"Checking GitHub Release");
+ progress(2,"最新版を確認中");
  if UPDATER_BUSY.swap(true,Ordering::SeqCst){return Err("Update already running".into())}
  let _unlock=Unlock;
  let Some((tag,url,size,digest))=release()? else{
-  progress(100,"Already up to date");
-  return Ok(format!("Already up to date (v{}).",env!("CARGO_PKG_VERSION")))
+  progress(100,"最新版を使用しています");
+  return Ok(format!("最新版を使用しています (v{}).",env!("CARGO_PKG_VERSION")))
  };
- progress(10,"Release found; preparing download");
+ progress(10,"更新版を確認しました。ダウンロード準備中");
  let folder=exe.parent().ok_or("Cannot find installation directory")?;
  let is_background_agent=std::env::current_exe().ok()
   .and_then(|p|p.file_name().and_then(|n|n.to_str()).map(|s|s.eq_ignore_ascii_case("mics-only.exe")))
@@ -81,18 +81,18 @@ pub fn install_with_progress(exe:&Path,mut progress:impl FnMut(u32,&str))->Resul
   dst.write_all(&buffer[..n]).map_err(|e|e.to_string())?;
   hasher.update(&buffer[..n]);total+=n as u64;
   let percent=10+((total.saturating_mul(75)/size).min(75)) as u32;
-  if percent>last_percent { last_percent=percent; progress(percent,"Downloading release ZIP"); }
+  if percent>last_percent { last_percent=percent; progress(percent,"更新ファイルを取得中"); }
  }
  dst.flush().map_err(|e|e.to_string())?;
  drop(dst);
- progress(87,"Checking download size and SHA256");
+ progress(87,"ファイルのサイズと SHA256 を検証中");
  if total!=size{return Err("Release ZIP size mismatch".into())}
  if let Some(expected)=digest{
   if !format!("{:x}",hasher.finalize()).eq_ignore_ascii_case(&expected){
    return Err("Release ZIP SHA256 mismatch".into())
   }
  }
- progress(94,"Download verified; preparing installer without automatic rollback");
+ progress(94,"検証完了。更新の適用準備中");
  let script=dir.join("apply-update.ps1");
  fs::write(&script,include_str!("../scripts/apply-update.ps1")).map_err(|e|e.to_string())?;
  let parent_id=if is_background_agent {0} else {std::process::id()};
@@ -103,7 +103,7 @@ pub fn install_with_progress(exe:&Path,mut progress:impl FnMut(u32,&str))->Resul
   .arg("-Version").arg(&tag)
   .creation_flags(CREATE_NO_WINDOW).spawn()
   .map_err(|e|format!("Cannot start update helper: {e}"))?;
- progress(100,"Package ready; Settings will close to install");
+ progress(100,"準備完了。更新のため設定画面を閉じます");
  Ok(format!("UPDATE_STAGED {tag}; closing parent to apply and verify, no automatic rollback; see data/update.log on failure"))
 }
 

@@ -713,7 +713,7 @@ fn inspect_database(c:&Config, password:&str, sql:Option<&str>) -> Result<String
         let query=format!("SELECT FIRST 10 * FROM \"{table}\"");
         let rows:Vec<rsfbclient::Row>=match db.query(&query,()) {
             Ok(r)=>r,
-            Err(e)=>{report.push_str(&format!("{table}: skipped ({e})\n"));continue}
+            Err(e)=>{report.push_str(&format!("{table}：取得できませんでした。\n"));continue}
         };
         if rows.is_empty(){continue}
         let names:Vec<String>=rows[0].cols.iter().map(|c|c.name.to_string()).collect();
@@ -729,7 +729,7 @@ fn inspect_database(c:&Config, password:&str, sql:Option<&str>) -> Result<String
         fs::write(export_dir.join(format!("{table}.csv")),out).map_err(|e|e.to_string())?;
         exported+=1;
     }
-    if sql.is_none(){report.push_str(&format!("Exported {exported} tables to {}",export_dir.display()));}
+    if sql.is_none(){report.push_str(&format!("{exported} 件のテーブルを保存しました。保存先：{}",export_dir.display()));}
     Ok(report)
 }
 

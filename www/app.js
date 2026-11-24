@@ -238,10 +238,10 @@ async function refresh(){
  if(c.ok)schedule=await c.json();
  $("total").textContent=order.length;$("running").textContent=(current.machines||[]).filter(m=>status(m.status_code)==="running").length;
  $("stopped").textContent=(current.machines||[]).filter(m=>status(m.status_code)==="danger").length;
- $("connection").textContent="LOCAL OK";$("server-mode").textContent=stat.mode||"UNKNOWN";
+ $("connection").textContent="接続中";$("server-mode").textContent=({ACTIVE:"稼働中",STANDBY:"待機中",MIRROR_ONLY:"閲覧専用",OFFLINE:"未接続"}[stat.mode]||"不明");
  $("updated").textContent=current.sampled_at?"更新: "+new Date(current.sampled_at).toLocaleString("ja-JP"):"保存データなし";
  if(view==="dashboard")drawDashboard();if(view==="schedule")drawSchedule();if(view==="all")drawAll();
- }catch(e){$("connection").textContent="OFFLINE"}
+ }catch(e){$("connection").textContent="未接続"}
 }
 function safeRead(key,otherwise){try{return localStorage.getItem(key)??otherwise}catch{return otherwise}}
 function safeStore(key,value){try{localStorage.setItem(key,value)}catch{}}
