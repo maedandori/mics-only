@@ -33,6 +33,12 @@ jobs:
         run: |
           npm install --no-audit --no-fund
           npm run build
+      - name: Verify actual native card in Chromium
+        working-directory: local-vue
+        run: |
+          npm install --no-save --no-package-lock --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+          node scripts/verify-pastel-browser.mjs
       - name: Run regression tests from repository root
         run: node --test local-vue/tests/*.test.mjs
       - name: Resolve Web version

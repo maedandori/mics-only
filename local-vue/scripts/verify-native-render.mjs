@@ -60,3 +60,11 @@ assert.match(dashboard,/target_cycle_seconds/);
 assert.match(dashboard,/mics-next-remain/);
 assert.match(runtime,/createElementNS/);
 assert.match(readFileSync(resolve(web,'assets/compiled-expressions.js'),'utf8'),/g\.target/);
+
+// HTML parsers ignore the self-closing slash on non-void custom elements.
+const cardAt=dashboard.indexOf('class="card mics-pastel-node');
+const card=dashboard.slice(cardAt,dashboard.indexOf('</article>',cardAt));
+assert.match(card,/<cycle-gauge[^>]*><\/cycle-gauge>\s*<dl class="mics-pastel-stats">/,'Cycle component must not consume the production stats in the native DOM');
+assert.match(card,/<donut-chart[^>]*><\/donut-chart>/);
+assert.match(card,/<status-badge[^>]*><\/status-badge>/);
+for(const label of ['予定数','良品数','不良数','残数'])assert.ok(card.includes(label),label);
