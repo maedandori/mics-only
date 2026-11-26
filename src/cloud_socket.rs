@@ -40,7 +40,7 @@ impl Channel{
   let result=tungstenite::client_tls_with_config(request,tcp,None,None);
   match &result{
    Ok(_)=>{traffic::record("socket","worker_http_response",1);traffic::record("socket","ws_connected",1);},
-   Err(tungstenite::Error::Http(_))=>{traffic::record("socket","worker_http_response",1);traffic::record("socket","http_error",1);traffic::record("socket","ws_error",1);},
+   Err(tungstenite::HandshakeError::Failure(tungstenite::Error::Http(_)))=>{traffic::record("socket","worker_http_response",1);traffic::record("socket","http_error",1);traffic::record("socket","ws_error",1);},
    Err(_)=>{traffic::record("socket","ws_error",1);}
   }
   result.map(|(ws,_)|ws).map_err(|_|"Socket handshake unavailable".into())
