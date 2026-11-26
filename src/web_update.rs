@@ -5,7 +5,7 @@ use std::{fs,path::{Path,PathBuf}};
 const API:u64=1;
 const REQUIRED:[&str;9]=["index.html","change-schedule.html","status-colors.html","change-aliases.html","assets/compat.js","assets/compiled-expressions.js","css/tailwind-generated.css","js/vanilla-runtime.js","js/dashboard-app.js"];
 #[derive(Default,Debug,Clone,Serialize,Deserialize)]
-struct Selection {current:Option<String>,previous:Option<String>}
+struct Selection {current:Option<String>,previous:Option<String>,#[serde(default)] applied_id:Option<i64>}
 fn version(s:&str)->Option<(u64,u64,u64)>{
     if s.len()>30{return None}
     let parts:Vec<_>=s.split('.').collect();
@@ -30,6 +30,8 @@ pub fn explicit_dir(www:&Path,prefix:&str)->Option<PathBuf>{
 }
 fn selected(root:&Path)->Option<String>{
     let s=state(root);
+    // None explicitly selects the bundled UI, even if rollback history exists.
+    s.current.as_ref()?;
     [s.current,s.previous].into_iter().flatten().find(|v|explicit_dir(&root.join("www"),&format!("web-v{v}")).is_some())
 }
 pub fn active_dir(www:&Path)->Option<(String,PathBuf)>{
@@ -126,17 +128,18 @@ mod windows {
     }
     fn apply(root:&Path,r:&Request)->Result<(),String>{
         let old=state(root);let current=selected(root);
+        if r.id.is_some()&&r.id==old.applied_id{return Ok(())}
         let next=if r.target=="rollback"{
             if let Some(v)=old.previous.as_deref(){if explicit_dir(&root.join("www"),&format!("web-v{v}")).is_none(){return Err("Previous web is unavailable".into())}}
             if current==old.previous{return Err("No different previous version".into())}
-            Selection{current:old.previous,previous:current}
+            Selection{current:old.previous,previous:current,applied_id:r.id}
         }else{
             if version(&r.target).is_none(){return Err("Invalid web version".into())}
-            if current.as_deref()==Some(&r.target){return Ok(())}
+            if current.as_deref()==Some(r.target.as_str()){return Ok(())}
             let dest=root.join("www").join(format!("web-v{}",r.target));
             if !dest.exists(){download(root,&r.target)?;}
             if !valid_bundle(&dest,&r.target){return Err("Invalid installed web version".into())}
-            Selection{current:Some(r.target.clone()),previous:current}
+            Selection{current:Some(r.target.clone()),previous:current,applied_id:r.id}
         };
         // Atomic pointer switch: old directory and live data never modified.
         atomic(&root.join("data/web-active.json"),&next)
@@ -150,13 +153,14 @@ mod windows {
                 let request=if let Ok(_guard)=REQUEST_LOCK.lock(){
                     fs::read_to_string(&req).ok().and_then(|s|{
                         let r=serde_json::from_str::<Request>(&s).ok().unwrap_or(Request{target:s.trim().to_owned(),id:None});
-                        if target_valid(&r.target){record(&root,&r,"updating",None);}
-                        let _=fs::remove_file(&req);
-                        target_valid(&r.target).then_some(r)
+                        if !target_valid(&r.target){let _=fs::remove_file(&req);return None}
+                        record(&root,&r,"updating",None);
+                        Some(r)
                     })
                 }else{None};
                 if let Some(r)=request{
                     match apply(&root,&r){Ok(())=>record(&root,&r,"success",None),Err(e)=>record(&root,&r,"failed",Some(&e))}
+                    if let Ok(_guard)=REQUEST_LOCK.lock(){let _=fs::remove_file(&req);}
                 }
                 thread::sleep(Duration::from_secs(2));
             }
