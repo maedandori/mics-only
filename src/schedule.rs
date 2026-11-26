@@ -29,10 +29,21 @@ fn read(host:&str,port:u16,db_name:&str,user:&str,password:&str,first:&str,end:&
  b.host(host).port(port).db_name(db_name).user(user).pass(password);
  b.with_transaction(|t|t.read_only().no_wait());
  let mut db=b.connect().map_err(|e|e.to_string())?;
- let fields:Vec<(String,)>=db.query(
-  "SELECT TRIM(RDB$FIELD_NAME) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='SCHEDULE'",()
- ).map_err(|e|e.to_string())?;
- let known:BTreeSet<String>=fields.into_iter().map(|(f,)|f.to_ascii_uppercase()).collect();
+ static SCHEDULE_FIELDS:std::sync::OnceLock<BTreeSet<String>>=std::sync::OnceLock::new();
+ let known=match SCHEDULE_FIELDS.get(){
+  Some(fields)=>fields.clone(),
+  None=>{
+   let fields:Vec<(String,)>=db.query(
+    "SELECT TRIM(RDB$FIELD_NAME) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='SCHEDULE'",()
+   ).map_err(|e|e.to_string())?;
+   let known:BTreeSet<String>=fields.into_iter().map(|(f,)|f.to_ascii_uppercase()).collect();
+   for field in ["MACHINENO","MACHINESEQ","MORDERNO","PARTSNO","PARTSNAME","TOOLENTRYNO","MSTART","MEND","DELETEFLG","CALCQTYMREMAIN"]{
+    if !known.contains(field){return Err(format!("SCHEDULE missing {field}; keeping previous D1 snapshot"))}
+   }
+   let _=SCHEDULE_FIELDS.set(known.clone());
+   known
+  }
+ };
  for field in ["MACHINENO","MACHINESEQ","MORDERNO","PARTSNO","PARTSNAME","TOOLENTRYNO","MSTART","MEND","DELETEFLG","CALCQTYMREMAIN"]{
   if !known.contains(field){return Err(format!("SCHEDULE missing {field}; keeping previous D1 snapshot"))}
  }
