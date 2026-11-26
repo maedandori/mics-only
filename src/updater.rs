@@ -11,7 +11,7 @@ struct Unlock;
 impl Drop for Unlock{fn drop(&mut self){UPDATER_BUSY.store(false,Ordering::SeqCst)}}
 
 fn parse_version(s:&str)->Option<(u64,u64,u64)>{
- let v=s.strip_prefix('v')?;
+ let v=s.strip_prefix("mo").or_else(||s.strip_prefix('v'))?;
  let parts:Vec<_>=v.split('.').collect();
  if parts.len()!=3{return None}
  Some((parts[0].parse().ok()?,parts[1].parse().ok()?,parts[2].parse().ok()?))
@@ -70,7 +70,7 @@ pub fn install_with_progress(exe:&Path,mut progress:impl FnMut(u32,&str))->Resul
  drop(_probe);
  let Some((tag,url,size,digest,migration))=release(!is_background_agent)? else{
   progress(100,"最新版を使用しています");
-  return Ok(format!("最新版を使用しています (v{}).",env!("CARGO_PKG_VERSION")))
+  return Ok(format!("最新版を使用しています (mo{}).",env!("CARGO_PKG_VERSION")))
  };
  progress(10,"更新版を確認しました。ダウンロード準備中");
  let blocked=folder.join("data").join("update-blocked-version.txt");
@@ -140,5 +140,7 @@ mod tests{
  #[test] fn version_order(){
   assert!(parse_version("v0.2.4")>parse_version("v0.2.3"));
   assert_eq!(parse_version("latest"),None);
+  assert_eq!(parse_version("mo0.2.69"),parse_version("v0.2.69"));
+  assert_eq!(parse_version("ed0.2.69"),None);
  }
 }
