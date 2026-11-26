@@ -2,6 +2,7 @@
 #[cfg(windows)]
 mod credentials;
 mod local_web;
+mod web_update;
 mod schedule;
 mod change_schedule;
 mod materials;
@@ -111,6 +112,10 @@ fn presence(c:&Config,coordinator_token:&str,alias_ack:Option<i64>)->Result<Valu
  if url.scheme()!="https"||url.host_str().is_none(){return Err("Invalid coordinator URL".into())}
  let mut payload=json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled,"version":reported_core_version(),"alias_sync_ack":alias_ack,
    "update_failed_version":env::current_exe().ok().and_then(|p|p.parent().map(|dir|dir.join("data").join("update-blocked-version.txt"))).and_then(|p|fs::read_to_string(p).ok()).map(|v|v.trim().trim_start_matches('v').to_owned())});
+ let web=web_update::status();
+ for key in ["web_version","web_previous_version","web_update_supported"]{payload[key]=web[key].clone();}
+ payload["web_update_status"]=web["status"].clone();
+ payload["web_update_command_id"]=web["command_id"].clone();
  if let Ok(launcher)=env::var("MICS_LAUNCHER_VERSION"){
     let status=core_data_path("launcher-status.json").and_then(|p|fs::read(p).ok()).and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or_default();
     payload["launcher_version"]=json!(launcher);
@@ -446,6 +451,7 @@ fn record_core_presence(){
 }
 #[cfg(windows)]
 fn remote_update_request(response:&Value,local:&local_web::LocalState){
+    web_update::queue_remote(response);
     if response["update_requested"]!=true{return}
     let mode=local.mode.lock().ok().map(|s|s.clone()).unwrap_or_default();
     if mode!="MIRROR_ONLY"&&mode!="STANDBY"{return}
@@ -469,6 +475,7 @@ fn run(c: Config) -> Result<(), String> {
         }
     }
     local_web::start(local.clone())?;
+    #[cfg(windows)] web_update::start();
     // Fetch alias from D1 in the agent, not from the browser. Works in standby,
     // active and mirror-only modes and never blocks the web UI.
     local_web::start_alias_sync(local.clone());

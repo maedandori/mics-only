@@ -4,6 +4,9 @@ name: Build and release MICS Only portable
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'local-vue/**'
+      - '.github/workflows/web-release.yml'
   pull_request:
     branches: [main]
   workflow_dispatch:

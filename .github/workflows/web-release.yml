@@ -1,0 +1,69 @@
+name: Build and release Local Web only
+on:
+  workflow_dispatch:
+    inputs:
+      web_version:
+        description: Independent Web version (for example 1.0.0)
+        required: true
+        type: string
+  pull_request:
+    branches: [main]
+    paths:
+      - 'local-vue/**'
+      - '.github/workflows/web-release.yml'
+concurrency:
+  group: mics-local-web-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build and test web only
+        working-directory: local-vue
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+      - name: Run regression tests from repository root
+        run: node --test local-vue/tests/*.test.mjs
+      - name: Package independently versioned UI
+        env:
+          WEB_VERSION: ${{ inputs.web_version || '1.0.0' }}
+        run: |
+          node local-vue/scripts/package-web.mjs "$WEB_VERSION"
+          cd web-package
+          zip -qr ../MICS-Web.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MICS-Web
+          path: MICS-Web.zip
+          if-no-files-found: error
+      - name: Refuse reuse of an immutable web tag
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WEB_VERSION: ${{ inputs.web_version }}
+        run: |
+          if git ls-remote --exit-code origin "refs/tags/web-v$WEB_VERSION"; then
+            echo "Version already published; choose a new version"
+            exit 1
+          else
+            code=$?
+            test "$code" -eq 2
+          fi
+      - name: Publish separate release (does not replace latest Core)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: web-v${{ inputs.web_version }}
+          target_commitish: ${{ github.sha }}
+          name: Local Web v${{ inputs.web_version }}
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: MICS-Web.zip
