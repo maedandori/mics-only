@@ -268,3 +268,16 @@ Local machine nodes now show 次の変更 (型替え / 色替え / 品番替え)
 ## v0.2.40 — Local web refresh without manual reload
 
 The local Windows agent keeps its loopback `GET /api/live` SSE stream, and additionally exposes a metadata-only `GET /api/json-versions` endpoint for `machines.json`, `schedule-local.json`, and local alias/status-color JSON files. The local dashboard and change-schedule page check these cheap version markers every 8 seconds while the page is open; if a file changed they reload the relevant JSON from the **same PC**, not D1/Turso/Firebird. Browser SSE remains the fastest path and is reconnected automatically. When SSE messages are missed or the socket reports connected but stalls, the version watchdog repairs the UI automatically. A busy dashboard queues missed refreshes. On older agents without the metadata endpoint, a 15–20-second local-only refresh fallback remains active. Versioned assets require one hard page reload when upgrading. The Windows release smoke test opens a real SSE stream, edits `data/machines.json`, and verifies the change event is delivered.
+
+## 0.2.66 — updater bridge (no Launcher/Core split yet)
+Install this normal portable release before the later Launcher/Core migration.
+The old updater can consume its existing ZIP name. **The first upgrade from
+0.2.65 or older still uses the old updater and cannot retroactively gain its
+recovery guarantees. Start it locally in Settings while the agent is standby.**
+After the bridge is installed, the new updater backs up the running binaries
+and web entry files before stopping, validates release files, prevents
+concurrent application, scopes process termination to this installation, and
+restarts the last working version on failed startup. INI, DPAPI and snapshots
+are never overwritten. Migration packages are accepted only from Settings,
+require SHA256 and a fresh Worker acknowledgement from the new Core before
+success. Do not publish the Core migration until this bridge is deployed.
