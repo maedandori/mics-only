@@ -96,7 +96,7 @@ function RestorePrevious {
 try{
  New-Item -ItemType Directory -Path $data -Force | Out-Null
  $lock=[IO.File]::Open((Join-Path $data 'update-apply.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
- if($Version -notmatch '^v\d+\.\d+\.\d+$'){throw 'Invalid version'}
+ if($Version -notmatch '^(?:mo|v)\d+\.\d+\.\d+$'){throw 'Invalid version'}
  if($Migration -and $ParentId -le 0){throw 'Migration requires Settings'}
  if(!(Test-Path -LiteralPath $Archive)){throw 'Release ZIP missing'}
  if((Get-Item -LiteralPath $Archive).Length -gt 120MB){throw 'ZIP too large'}
@@ -127,7 +127,7 @@ try{
  $old=@(Own 'mics-only')
  $oldWasRunning=$old.Count -gt 0
  $status=GetHealth
- if($status -and $status.version -and ([version]$status.version -ge [version]$Version.TrimStart('v'))){throw 'Already updated, update postponed'}
+ if($status -and $status.version -and ([version]$status.version -ge [version]($Version -replace '^(mo|v)',''))){throw 'Already updated, update postponed'}
  if($status -and $status.mode -eq 'ACTIVE'){throw 'ACTIVE agent, update postponed'}
  if($oldWasRunning -and (!$status -or !$status.ok -or $status.mode -notin @('STANDBY','MIRROR_ONLY'))){throw 'Agent status unavailable, update postponed'}
  if(!$oldWasRunning -and ($ParentId -eq 0 -or $status)){throw 'Agent status unavailable, update postponed'}
@@ -160,7 +160,7 @@ try{
  foreach($n in $web){Copy-Item -LiteralPath (Join-Path (Join-Path $stage 'www') $n) -Destination (Join-Path (Join-Path $Target 'www') $n) -Force}
  Log 'UPDATE_STAGE 75 Starting new agent'
  $process=Start-Process -FilePath (Join-Path $Target 'mics-only.exe') -WorkingDirectory $Target -PassThru
- WaitHealth $process ($Version.TrimStart('v')) ([bool]$Migration)
+ WaitHealth $process (($Version -replace '^(mo|v)','')) ([bool]$Migration)
  Remove-Item -LiteralPath (Join-Path $data 'update-blocked-version.txt') -Force -ErrorAction SilentlyContinue
  Log "UPDATE_SUCCESS $Version"
 }catch{

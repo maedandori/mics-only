@@ -97,10 +97,10 @@ fn main() {
         .and_then(|body|body["version"].as_str().map(str::to_owned))
         .unwrap_or_else(||"offline".to_string());
     let version_caption=format!(
-        "設定 v{}　｜　稼働版 {}",
+        "設定 mo{}　｜　稼働版 {}",
         env!("CARGO_PKG_VERSION"),
         if running_version=="offline" {"停止中".to_owned()}
-        else {format!("v{running_version}")}
+        else {format!("mo{running_version}")}
     );
     let mut version_label=nwg::Label::default();
     nwg::Label::builder().text(&version_caption).parent(&window)

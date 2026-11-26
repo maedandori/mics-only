@@ -149,8 +149,9 @@ jobs:
             if (!$updaterText.Contains($required)) { throw "Missing bridge safety contract: $required" }
           }
 
-      - name: Upload portable artifact
+      - name: Upload optional portable artifact
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: MICS-Only-Launcher-and-Core
           path: |
@@ -162,7 +163,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
-          name: MICS Only v${{ steps.version.outputs.version }}
+          name: MICS Only mo${{ steps.version.outputs.version }} / Launcher ml1.0.1
           target_commitish: ${{ github.sha }}
           draft: false
           prerelease: false

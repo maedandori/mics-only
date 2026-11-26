@@ -91,7 +91,9 @@ fn save(dir:&Path,f:&Form)->Result<(),String>{
  Ok(())
 }
 fn status()->Value{
- ureq::AgentBuilder::new().timeout(Duration::from_secs(3)).build().get("http://127.0.0.1:8787/api/status").call().ok().and_then(|r|r.into_json::<Value>().ok()).filter(|v|v["ok"]==true).unwrap_or_else(||json!({"ok":false,"mode":"OFFLINE"}))
+ let mut out=ureq::AgentBuilder::new().timeout(Duration::from_secs(3)).build().get("http://127.0.0.1:8787/api/status").call().ok().and_then(|r|r.into_json::<Value>().ok()).filter(|v|v["ok"]==true).unwrap_or_else(||json!({"ok":false,"mode":"OFFLINE"}));
+ if let Some(v)=root().ok().and_then(|d|fs::read(d.join("data/launcher-status.json")).ok()).and_then(|b|serde_json::from_slice::<Value>(&b).ok()).and_then(|v|v["launcher_version"].as_str().map(str::to_owned)){out["launcher_version"]=json!(v);}
+ out
 }
 #[tauri::command]
 fn load_settings()->Result<Value,String>{let dir=root()?;Ok(json!({"version":VERSION,"form":form_from(&read_ini(&dir)?,startup_enabled(&dir)),"credentials_configured":credentials::configured()}))}

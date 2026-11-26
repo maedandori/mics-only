@@ -88,8 +88,14 @@ mod windows {
     }
     fn download(root:&Path,v:&str)->Result<PathBuf,String>{
         let agent=ureq::AgentBuilder::new().timeout(Duration::from_secs(120)).build();
-        let tag=format!("web-v{v}");
-        let release:Value=agent.get(&format!("https://api.github.com/repos/maedandori/mics-only/releases/tags/{tag}")).set("User-Agent","mics-web-updater").call().map_err(err)?.into_json().map_err(err)?;
+        let legacy=format!("web-v{v}");
+        let branded=format!("mw{v}");
+        // Keep web-v first for Core 0.2.69 compatibility; new cores also accept mw.
+        let (tag,release):(String,Value)=match agent.get(&format!("https://api.github.com/repos/maedandori/mics-only/releases/tags/{legacy}")).set("User-Agent","mics-web-updater").call(){
+            Ok(r)=>(legacy,r.into_json().map_err(err)?),
+            Err(ureq::Error::Status(404,_))=>{let r=agent.get(&format!("https://api.github.com/repos/maedandori/mics-only/releases/tags/{branded}")).set("User-Agent","mics-web-updater").call().map_err(err)?;(branded,r.into_json().map_err(err)?)},
+            Err(e)=>return Err(err(e)),
+        };
         if release["tag_name"].as_str()!=Some(tag.as_str())||release["draft"]==true{return Err("Invalid web release".into())}
         let asset=release["assets"].as_array().and_then(|a|a.iter().find(|a|a["name"]==ASSET)).ok_or("Web asset missing")?;
         let url=format!("https://github.com/maedandori/mics-only/releases/download/{tag}/{ASSET}");
@@ -119,7 +125,7 @@ mod windows {
             for part in html.split(['"','\'']){if let Some(rel)=part.strip_prefix(&prefix){if rel.contains("..")||!out.join(rel).is_file(){return Err("Missing referenced web asset".into())}count+=1;}}
             if count==0{return Err("Missing versioned asset references".into())}
         }
-        let dest=root.join("www").join(tag);
+        let dest=root.join("www").join(format!("web-v{v}"));
         // Never overwrite a published generation, including one still used by a browser.
         if dest.exists(){return Err("Web version already exists; publish a new version".into())}
         fs::rename(&out,&dest).map_err(err)?;

@@ -15,7 +15,7 @@ mod windows {
     const NO_WINDOW:u32=0x08000000;
     const LIMIT:u64=120_000_000;
     const ASSET:&str="MICS-Core-Windows.zip";
-    const LAUNCHER_VERSION:&str="1.0.0";
+    const LAUNCHER_VERSION:&str="1.0.1";
     #[derive(Clone,Debug,Serialize,Deserialize)]
     struct Slot { name:String, version:String }
     #[derive(Clone,Debug,Serialize,Deserialize)]
@@ -63,7 +63,7 @@ mod windows {
         }
     }
     fn publish_status(root:&Path,state:&State,phase:&str){
-        let value=json!({"launcher_version":LAUNCHER_VERSION,"core_version":state.active.version,"core_slot":state.active.name,"previous_core_version":state.previous.as_ref().map(|s|&s.version),"phase":phase});
+        let value=json!({"launcher_version":LAUNCHER_VERSION,"launcher_label":format!("ml{LAUNCHER_VERSION}"),"core_version":state.active.version,"core_slot":state.active.name,"previous_core_version":state.previous.as_ref().map(|s|&s.version),"phase":phase});
         let _=atomic(&root.join("data/launcher-status.json"),value.to_string().as_bytes());
     }
     fn persist(root:&Path,state:&State)->Result<(),String>{
@@ -142,14 +142,15 @@ mod windows {
     fn download(root:&Path,installed:&str,repair:bool)->Result<Option<Staged>,String>{
         let agent=ureq::AgentBuilder::new().timeout(Duration::from_secs(180)).build();
         let r:Value=agent.get("https://api.github.com/repos/maedandori/mics-only/releases/latest").set("User-Agent","mics-only-launcher").call().map_err(err)?.into_json().map_err(err)?;
-        let tag=r["tag_name"].as_str().and_then(|v|v.strip_prefix('v')).ok_or("Missing release version")?;
+        let release_tag=r["tag_name"].as_str().ok_or("Missing release version")?;
+        let tag=release_tag.strip_prefix("mo").or_else(||release_tag.strip_prefix('v')).ok_or("Missing release version")?;
         let latest=version(tag).ok_or("Invalid release version")?;
         let current=version(installed).ok_or("Invalid installed version")?;
         if latest<current||(latest==current&&!repair){return Ok(None)}
-        if fs::read_to_string(root.join("data/update-blocked-version.txt")).ok().is_some_and(|s|s.trim().trim_start_matches('v')==tag){return Ok(None)}
+        if fs::read_to_string(root.join("data/update-blocked-version.txt")).ok().is_some_and(|s|s.trim().trim_start_matches("mo").trim_start_matches('v')==tag){return Ok(None)}
         let asset=r["assets"].as_array().and_then(|a|a.iter().find(|v|v["name"]==ASSET)).ok_or("Independent Core asset missing")?;
         let url=asset["browser_download_url"].as_str().ok_or("Missing release URL")?;
-        let expected_url=format!("https://github.com/maedandori/mics-only/releases/download/v{tag}/{ASSET}");
+        let expected_url=format!("https://github.com/maedandori/mics-only/releases/download/{release_tag}/{ASSET}");
         if url!=expected_url{return Err("Untrusted release URL".into())}
         let size=asset["size"].as_u64().filter(|s|*s>0&&*s<=LIMIT).ok_or("Invalid archive size")?;
         let digest=asset["digest"].as_str().and_then(|d|d.strip_prefix("sha256:")).filter(|d|d.len()==64&&d.bytes().all(|b|b.is_ascii_hexdigit())).ok_or("SHA256 release digest required")?;
@@ -210,7 +211,7 @@ mod windows {
         if u.scheme()!="https"||u.host_str().is_none()||!u.username().is_empty()||u.password().is_some()||u.query().is_some()||u.fragment().is_some(){return false}
         let Ok(secret)=credentials::load() else{return false};
         if secret.coordinator_token.is_empty(){return false}
-        let failed=fs::read_to_string(root.join("data/update-blocked-version.txt")).ok().map(|s|s.trim().trim_start_matches('v').to_owned());
+        let failed=fs::read_to_string(root.join("data/update-blocked-version.txt")).ok().map(|s|s.trim().trim_start_matches("mo").trim_start_matches('v').to_owned());
         let status=fs::read(root.join("data/launcher-status.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or_default();
         let body=json!({"agent_id":id,"display_name":fields.get("display_name").unwrap_or(id),"role":"backup","standby_enabled":false,"version":state.active.version,"update_failed_version":failed,"launcher_version":LAUNCHER_VERSION,"core_state":"offline","core_phase":status["phase"],"previous_core_version":state.previous.as_ref().map(|s|&s.version)});
         ureq::AgentBuilder::new().timeout(Duration::from_secs(5)).build().post(&format!("{}/presence",endpoint.trim_end_matches('/'))).set("Authorization",&format!("Bearer {}",secret.coordinator_token)).send_json(body).ok().and_then(|r|r.into_json::<Value>().ok()).is_some_and(|r|r["update_requested"]==true)
