@@ -420,6 +420,14 @@ fn reported_core_version()->String{
     env!("CARGO_PKG_VERSION").into()
 }
 fn record_core_presence(){
+    if env::var_os("MICS_SUPERVISED").is_some(){
+        if let Some(path)=core_data_path("migration-presence.json"){
+            let receipt=json!({"pid":std::process::id(),"version":env!("CARGO_PKG_VERSION"),"ack":true,"ack_at_ms":chrono::Utc::now().timestamp_millis()});
+            if let Some(parent)=path.parent(){let _=fs::create_dir_all(parent);}
+            let tmp=path.with_extension("tmp");
+            if fs::write(&tmp,receipt.to_string()).is_ok(){let _=fs::rename(&tmp,&path);}
+        }
+    }
     let Ok(token)=env::var("MICS_TRIAL_TOKEN") else{return};
     if let Some(path)=core_data_path(&format!("core-presence-{token}")){
         if let Some(parent)=path.parent(){let _=fs::create_dir_all(parent);}

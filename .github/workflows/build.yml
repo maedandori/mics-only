@@ -141,11 +141,9 @@ jobs:
           $parseErrors=$null
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path scripts/apply-update.ps1),[ref]$tokens,[ref]$parseErrors) | Out-Null
           if ($parseErrors.Count -gt 0) { throw "Updater syntax errors: $($parseErrors | Out-String)" }
-          # Ensure the installed script never restores an older EXE on failure.
           $updaterText=Get-Content scripts/apply-update.ps1 -Raw
-          if ($updaterText -notmatch 'UPDATE_FAILED_NO_ROLLBACK') { throw 'No-rollback failure marker missing' }
-          foreach ($forbidden in @('ROLLBACK_BEGIN','ROLLBACK_RESTORED','ROLLBACK_RESTARTED','function Restore')) {
-            if ($updaterText.Contains($forbidden)) { throw "Automatic rollback code remained: $forbidden" }
+          foreach ($required in @('UPDATE_PREFLIGHT_OK','UPDATE_RECOVERY_RESTARTED','migration-presence.json')) {
+            if (!$updaterText.Contains($required)) { throw "Missing bridge safety contract: $required" }
           }
 
       - name: Upload portable artifact

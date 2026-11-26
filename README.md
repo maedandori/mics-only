@@ -269,14 +269,17 @@ Local machine nodes now show 次の変更 (型替え / 色替え / 品番替え)
 
 The local Windows agent keeps its loopback `GET /api/live` SSE stream, and additionally exposes a metadata-only `GET /api/json-versions` endpoint for `machines.json`, `schedule-local.json`, and local alias/status-color JSON files. The local dashboard and change-schedule page check these cheap version markers every 8 seconds while the page is open; if a file changed they reload the relevant JSON from the **same PC**, not D1/Turso/Firebird. Browser SSE remains the fastest path and is reconnected automatically. When SSE messages are missed or the socket reports connected but stalls, the version watchdog repairs the UI automatically. A busy dashboard queues missed refreshes. On older agents without the metadata endpoint, a 15–20-second local-only refresh fallback remains active. Versioned assets require one hard page reload when upgrading. The Windows release smoke test opens a real SSE stream, edits `data/machines.json`, and verifies the change event is delivered.
 
-## Launcher/Core migration (0.2.66)
-**Initial installation requires manual migration.** Do not use the legacy Admin
-update command to install this architecture. The old updater only copies two
-executables. Stop the old agent/settings on the target Windows PC, preserve
-mics.ini, data, and the existing Windows-user DPAPI credentials, back up the
-old executables, then extract MICS-Only-Launcher-Windows.zip into the same
-directory and start mics-only.exe. Do not overwrite an existing Core slot on
-subsequent installs. Test the standby PC first; never migrate all agents at once.
+## Launcher/Core migration (0.2.67)
+First install the v0.2.66 updater bridge while it is the latest legacy release.
+After the bridge is verified on the target PC, use its Settings Update button to
+install the separate Launcher package. The bridge backs up the old EXEs and
+restores them if the new Core cannot report a fresh authenticated Worker ACK.
+Never attempt the migration through legacy Admin updates. PCs still on v0.2.65
+or earlier need the v0.2.66 bridge installed first (or manual Launcher install).
+Manual alternative: stop the old agent/settings, preserve mics.ini, data, and
+Windows-user DPAPI credentials, back up old executables, then extract the new
+Launcher ZIP into the same directory. Do not overwrite existing Core slots.
+Test standby first, never migrate all agents at once.
 
 mics-only.exe is the stable supervisor (launcher protocol 1.0.0).
 mics-core-a.exe / mics-core-b.exe are separate executables beside it so all
