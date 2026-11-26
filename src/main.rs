@@ -548,8 +548,11 @@ fn run(c: Config) -> Result<(), String> {
                 local.set_mode("ACTIVE");
                 local.set_poll_interval(active_poll_seconds);
                 last_mirror=None;
-                if last_data_poll.is_some_and(|at|at.elapsed()<Duration::from_secs(active_poll_seconds)){
-                    let data_wait=remaining_poll_seconds(last_data_poll,active_poll_seconds);
+                // A lease-only wake-up must not skip a due production OR schedule poll.
+                if last_data_poll.is_some_and(|at|at.elapsed()<Duration::from_secs(active_poll_seconds))
+                    && schedule_polled_at.is_some_and(|at|at.elapsed()<Duration::from_secs(ACTIVE_SCHEDULE_SECONDS)){
+                    let data_wait=remaining_poll_seconds(last_data_poll,active_poll_seconds)
+                        .min(remaining_poll_seconds(schedule_polled_at,ACTIVE_SCHEDULE_SECONDS));
                     local.schedule_next_poll(Some(data_wait));
                     thread::sleep(Duration::from_secs(data_wait.min(lease_wait_seconds())));
                     continue
@@ -645,7 +648,9 @@ fn run(c: Config) -> Result<(), String> {
                     }
                     Err(e) => {local.record_sync("READ_FAILED");eprintln!("MICS_READ_FAILED {e}");},
                 }
-                next_data_wait=remaining_poll_seconds(last_data_poll,active_poll_seconds);
+                // UI reports the next local data update, not a lease renewal.
+                next_data_wait=remaining_poll_seconds(last_data_poll,active_poll_seconds)
+                    .min(remaining_poll_seconds(schedule_polled_at,ACTIVE_SCHEDULE_SECONDS));
                 next_wait=next_data_wait.min(lease_wait_seconds());
             }
             Ok(None) => {
