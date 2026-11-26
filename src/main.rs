@@ -9,6 +9,8 @@ mod change_schedule;
 mod materials;
 mod mirror;
 mod cloud_socket;
+mod polling;
+mod traffic;
 use chrono::{DateTime, Utc};
 use rsfbclient::prelude::*;
 use serde::Deserialize;
@@ -18,6 +20,7 @@ use std::{collections::BTreeMap, env, fs, net::{TcpStream,ToSocketAddrs}, thread
 
 // Local schedule refresh is independent of cloud writes and lease heartbeats.
 const ACTIVE_SCHEDULE_SECONDS: u64 = 20;
+const FAST_PRODUCTION_SECONDS: u64 = 5;
 const STANDBY_MIRROR_SECONDS: u64 = 100;
 const PRESENCE_SECONDS: u64 = 60;
 
@@ -111,9 +114,9 @@ fn presence(c:&Config,coordinator_token:&str,alias_ack:Option<i64>)->Result<Valu
  let payload=json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled,"version":env!("CARGO_PKG_VERSION"),"alias_sync_ack":alias_ack,
    "update_failed_version":env::current_exe().ok().and_then(|p|p.parent().map(|dir|dir.join("data").join("update-blocked-version.txt"))).and_then(|p|fs::read_to_string(p).ok()).map(|v|v.trim().trim_start_matches('v').to_owned())});
  if let Some(result)=cloud_socket::call("presence",&payload,None){return result}
- let result=client().post(&format!("{}/presence",c.coordinator_url.trim_end_matches('/')))
+ let result=traffic::http("presence",true,||client().post(&format!("{}/presence",c.coordinator_url.trim_end_matches('/')))
   .set("Authorization",&format!("Bearer {coordinator_token}"))
-  .send_json(payload)
+  .send_json(payload))
   .map_err(|e|match e {
       ureq::Error::Status(status, response) => {
           let detail=response.into_string().unwrap_or_default();
@@ -147,9 +150,9 @@ fn acquire(c: &Config, coordinator_token: &str) -> Result<Option<Lease>, String>
             Some(result)=>serde_json::from_value(result?).map_err(|_|"Invalid socket lease response".to_string())?,
             None=>{
                 // The old HTTP server accepts only TTL=45; keep mixed versions safe.
-                let response=client().post(&format!("{}/lease",c.coordinator_url.trim_end_matches('/')))
+                let response=traffic::http("lease",true,||client().post(&format!("{}/lease",c.coordinator_url.trim_end_matches('/')))
                     .set("Authorization",&format!("Bearer {coordinator_token}"))
-                    .send_json(json!({"agent_id":c.agent_id,"role":"backup","ttl_seconds":45}))
+                    .send_json(json!({"agent_id":c.agent_id,"role":"backup","ttl_seconds":45})))
                     .map_err(|e|format!("LEASE_REQUEST_FAILED {e}"))?;
                 response.into_json().map_err(|_|"Invalid HTTP lease response".to_string())?
             }
@@ -375,12 +378,12 @@ fn upload(c: &Config, sync_token: &str, lease: &Lease, snapshot: Value) -> Resul
     if let Some(result)=cloud_socket::call("sync",&snapshot,Some(lease)){
         return if result?["ok"]==true{Ok(())}else{Err("Socket sync not acknowledged".into())}
     }
-    let response = client().post(&format!("{}/sync", c.coordinator_url.trim_end_matches('/')))
+    let response = traffic::http("sync",true,||client().post(&format!("{}/sync", c.coordinator_url.trim_end_matches('/')))
         .set("Authorization", &format!("Bearer {sync_token}"))
         .set("X-Mics-Agent-Id", &c.agent_id)
         .set("X-Mics-Lease-Token", &lease.lease_token)
         .set("X-Mics-Lease-Epoch", &lease.epoch.to_string())
-        .send_json(snapshot).map_err(|e| format!("SYNC_FAILED {e}"))?;
+        .send_json(snapshot)).map_err(|e| format!("SYNC_FAILED {e}"))?;
     let body: Value = response.into_json().map_err(|e| format!("Bad sync JSON: {e}"))?;
     if body["ok"] != true {return Err("Sync not acknowledged by coordinator".into())}
     Ok(())
@@ -420,8 +423,8 @@ fn remote_update_request(response:&Value,local:&local_web::LocalState){
 fn run(c: Config) -> Result<(), String> {
     // Always serve the local dashboard, even when standby is disabled or lease denied.
     let local=local_web::LocalState::new(local_web::default_snapshot_path());
-    let active_poll_seconds=c.interval.min(ACTIVE_SCHEDULE_SECONDS);
-    local.set_poll_interval(active_poll_seconds);
+    let mut polling=polling::AdaptivePolling::new(FAST_PRODUCTION_SECONDS,c.interval);
+    local.set_poll_interval(polling.production_seconds());
     // Alias settings use shared D1; local machine/schedule API remains entirely local.
     // The coordinator secret is read from DPAPI and never exposed to browser JS.
     #[cfg(windows)]
@@ -541,72 +544,52 @@ fn run(c: Config) -> Result<(), String> {
             }
             last_presence=Some(std::time::Instant::now());
         }
-        let mut next_wait=active_poll_seconds;
-        let mut next_data_wait=active_poll_seconds;
+        let mut next_wait=polling.production_seconds();
+        let mut next_data_wait=polling.production_seconds();
         match acquire(&c, &coordinator_token) {
             Ok(Some(lease)) => {
                 local.set_mode("ACTIVE");
-                local.set_poll_interval(active_poll_seconds);
+                local.set_poll_interval(polling.production_seconds());
                 last_mirror=None;
-                // A lease-only wake-up must not skip a due production OR schedule poll.
-                if last_data_poll.is_some_and(|at|at.elapsed()<Duration::from_secs(active_poll_seconds))
-                    && schedule_polled_at.is_some_and(|at|at.elapsed()<Duration::from_secs(ACTIVE_SCHEDULE_SECONDS)){
-                    let data_wait=remaining_poll_seconds(last_data_poll,active_poll_seconds)
-                        .min(remaining_poll_seconds(schedule_polled_at,ACTIVE_SCHEDULE_SECONDS));
+                let production_due=polling::due(last_data_poll,polling.production_seconds());
+                let schedule_due=polling::due(schedule_polled_at,polling.schedule_seconds(ACTIVE_SCHEDULE_SECONDS));
+                let material_refresh_seconds=if materials_sync_failed {300}else{86400};
+                let material_due=polling::due(materials_polled_at,material_refresh_seconds);
+                // Independent deadlines: lease/presence wakes never force a Firebird query.
+                if !production_due&&!schedule_due&&!material_due{
+                    let data_wait=remaining_poll_seconds(last_data_poll,polling.production_seconds())
+                        .min(remaining_poll_seconds(schedule_polled_at,polling.schedule_seconds(ACTIVE_SCHEDULE_SECONDS)));
                     local.schedule_next_poll(Some(data_wait));
                     thread::sleep(Duration::from_secs(data_wait.min(lease_wait_seconds())));
                     continue
                 }
-                last_data_poll=Some(std::time::Instant::now());
-                let material_refresh_seconds=if materials_sync_failed {300}else{86400};
-                if materials_polled_at.map(|t|t.elapsed()>=Duration::from_secs(material_refresh_seconds)).unwrap_or(true){
-                    materials_polled_at=Some(std::time::Instant::now());
-                    match materials::sync(&c,&db_password){
-                        Ok(n)=>{
-                            materials_sync_failed=false;
-                            println!("MATERIAL_LOCAL_ONLY_OK mapped_products={n}; no Turso upload");
-                        },
-                        Err(e)=>{
-                            materials_sync_failed=true;
-                            eprintln!("MATERIAL_LOCAL_SYNC_FAILED {e}");
-                        }
-                    }
-                }
-                if schedule_polled_at.map(|t|t.elapsed()>=Duration::from_secs(ACTIVE_SCHEDULE_SECONDS)).unwrap_or(true){
-                    // A valid coordinator lease is required before opening Firebird
-                    // even for the local-only schedule cache.
-                    if let Ok(Some(grant))=acquire(&c,&coordinator_token){
-                        if grant.epoch==lease.epoch{
-                            match schedule::collect(&c,&db_password){
-                                Ok(cache)=>{
-                                    schedule_polled_at=Some(std::time::Instant::now());
-                                    println!("LOCAL_SCHEDULE_CACHE_OK");
-                                    // Fenced upload; retain cache and retry on later reads.
-                                    match acquire(&c,&coordinator_token) {
-                                        Ok(Some(upload_lease)) if upload_lease.epoch==lease.epoch=>{
-                                            match schedule::upload_if_changed(&c,&sync_token,&upload_lease,&cache){
-                                                Ok(true)=>println!("MICS_SCHEDULE_SYNC_OK"),
-                                                Ok(false)=>(),
-                                                Err(e)=>eprintln!("MICS_SCHEDULE_SYNC_FAILED {e}")
-                                            }
-                                        },
-                                        _=>eprintln!("MICS_SCHEDULE_LEASE_LOST")
-                                    }
-                                },
-                                Err(e)=>{schedule_polled_at=Some(std::time::Instant::now());eprintln!("LOCAL_SCHEDULE_FAILED {e}");}
-                            }
-                        }
-                    }
-                }
+                // Production is handled below before optional schedule/material reads.
+                // Start at most one Firebird task at a time; no parallel SQL.
+                if production_due {
                 // Refresh a near-expiry grant before opening another Firebird connection.
                 let read_grant=acquire(&c,&coordinator_token);
                 if !matches!(read_grant,Ok(Some(ref grant)) if grant.epoch==lease.epoch){
                     local.set_mode("STANDBY");local.record_sync("LEASE_LOST");
+                    previous_hash.clear();previous_cloud_state.clear();last_data_poll=None;schedule_polled_at=None;
                     thread::sleep(Duration::from_secs(lease_wait_seconds()));continue
                 }
-                match read(&c, &db_password) {
+                let read_started=std::time::Instant::now();
+                let result=read(&c,&db_password);
+                let elapsed=read_started.elapsed();
+                last_data_poll=Some(std::time::Instant::now());
+                let read_ok=result.as_ref().is_ok_and(|data|data["machines"].as_array().is_some_and(|a|!a.is_empty()));
+                traffic::firebird("production",elapsed,read_ok);
+                if polling.observe(elapsed,read_ok){
+                    local.set_poll_interval(polling.production_seconds());
+                    println!("FIREBIRD_ADAPTIVE interval={}s elapsed={}ms success={}",polling.production_seconds(),elapsed.as_millis(),read_ok);
+                }
+                match result {
                     Ok(mut data) => {
-                        if data["machines"].as_array().is_none_or(|a| a.is_empty()) {
+                        if !read_grant.as_ref().ok().and_then(|g|g.as_ref()).is_some_and(|g|g.valid(&c.agent_id)){
+                            local.record_sync("LEASE_LOST");
+                            previous_hash.clear();previous_cloud_state.clear();
+                            eprintln!("LEASE_EXPIRED_DURING_READ");
+                        } else if data["machines"].as_array().is_none_or(|a| a.is_empty()) {
                             local.record_sync("READ_EMPTY");
                             eprintln!("MICS_READ_EMPTY: refused to overwrite current data");
                         } else {
@@ -648,9 +631,61 @@ fn run(c: Config) -> Result<(), String> {
                     }
                     Err(e) => {local.record_sync("READ_FAILED");eprintln!("MICS_READ_FAILED {e}");},
                 }
+                } // production_due
+                if schedule_due{
+                    // A valid coordinator lease is required before opening Firebird
+                    // even for the local-only schedule cache.
+                    if let Ok(Some(grant))=acquire(&c,&coordinator_token){
+                        if grant.epoch==lease.epoch{
+                            let started=std::time::Instant::now();
+                            let result=schedule::collect(&c,&db_password);
+                            traffic::firebird("schedule",started.elapsed(),result.is_ok());
+                            polling.observe_load(started.elapsed(),result.is_ok());
+                            match result{
+                                Ok(cache) if grant.valid(&c.agent_id)=>{
+                                    schedule_polled_at=Some(std::time::Instant::now());
+                                    println!("LOCAL_SCHEDULE_CACHE_OK");
+                                    // Fenced upload; retain cache and retry on later reads.
+                                    match acquire(&c,&coordinator_token) {
+                                        Ok(Some(upload_lease)) if upload_lease.epoch==lease.epoch=>{
+                                            match schedule::upload_if_changed(&c,&sync_token,&upload_lease,&cache){
+                                                Ok(true)=>println!("MICS_SCHEDULE_SYNC_OK"),
+                                                Ok(false)=>(),
+                                                Err(e)=>eprintln!("MICS_SCHEDULE_SYNC_FAILED {e}")
+                                            }
+                                        },
+                                        _=>eprintln!("MICS_SCHEDULE_LEASE_LOST")
+                                    }
+                                },
+                                Ok(_)=>{schedule_polled_at=Some(std::time::Instant::now());eprintln!("LOCAL_SCHEDULE_LEASE_EXPIRED");},
+                                Err(e)=>{schedule_polled_at=Some(std::time::Instant::now());eprintln!("LOCAL_SCHEDULE_FAILED {e}");}
+                            }
+                        }
+                    }
+                }
+                if material_due && matches!(acquire(&c,&coordinator_token),Ok(Some(ref grant)) if grant.epoch==lease.epoch){
+                    materials_polled_at=Some(std::time::Instant::now());
+                    let started=std::time::Instant::now();
+                    let result=materials::sync(&c,&db_password);
+                    traffic::firebird("materials",started.elapsed(),result.is_ok());
+                    // The daily full material query is not representative of fast production reads.
+                    // Failures or very slow reads still trigger load protection.
+                    if result.is_err()||started.elapsed()>=Duration::from_secs(1){polling.observe_load(started.elapsed(),result.is_ok());}
+                    match result{
+                        Ok(n)=>{
+                            materials_sync_failed=false;
+                            println!("MATERIAL_LOCAL_ONLY_OK mapped_products={n}; no Turso upload");
+                        },
+                        Err(e)=>{
+                            materials_sync_failed=true;
+                            eprintln!("MATERIAL_LOCAL_SYNC_FAILED {e}");
+                        }
+                    }
+                }
+                local.set_poll_interval(polling.production_seconds());
                 // UI reports the next local data update, not a lease renewal.
-                next_data_wait=remaining_poll_seconds(last_data_poll,active_poll_seconds)
-                    .min(remaining_poll_seconds(schedule_polled_at,ACTIVE_SCHEDULE_SECONDS));
+                next_data_wait=remaining_poll_seconds(last_data_poll,polling.production_seconds())
+                    .min(remaining_poll_seconds(schedule_polled_at,polling.schedule_seconds(ACTIVE_SCHEDULE_SECONDS)));
                 next_wait=next_data_wait.min(lease_wait_seconds());
             }
             Ok(None) => {
@@ -691,7 +726,7 @@ fn test_connection(c:&Config)->Result<(),String>{
         return Err("Coordinator URL missing: cannot register this PC in D1".into())
     }
     let health=format!("{}/health",c.coordinator_url.trim_end_matches('/'));
-    let response=client().get(&health).call().map_err(|e|format!("COORDINATOR_HTTP_FAILED {e}"))?;
+    let response=traffic::http("health",true,||client().get(&health).call()).map_err(|e|format!("COORDINATOR_HTTP_FAILED {e}"))?;
     let result:Value=response.into_json().map_err(|e|format!("COORDINATOR_BAD_RESPONSE {e}"))?;
     if result["service"]!="mics-failover"||result["ok"]!=true{return Err("Coordinator health response is invalid".into())}
     println!("COORDINATOR_HTTP_OK; enabled={}",result["enabled"]);

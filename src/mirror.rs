@@ -7,9 +7,9 @@ pub fn refresh(c:&super::Config,token:&str,local:&super::local_web::LocalState)-
     let body:Value=match super::cloud_socket::call("cache",&json!({}),None){
         Some(result)=>result?,
         None=>{
-            let response=super::client().get(&url)
+            let response=super::traffic::http("cache",true,||super::client().get(&url)
                 .set("Authorization",&format!("Bearer {token}"))
-                .call().map_err(|e|format!("MIRROR_FETCH_FAILED {e}"))?;
+                .call()).map_err(|e|format!("MIRROR_FETCH_FAILED {e}"))?;
             response.into_json().map_err(|e|e.to_string())?
         }
     };

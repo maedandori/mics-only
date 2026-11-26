@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #[path="../../src/credentials.rs"] mod credentials;
 #[path="../../src/updater.rs"] mod updater;
+#[path="../../src/traffic.rs"] mod traffic;
 use serde::{Deserialize,Serialize};
 use serde_json::{json,Value};
 use std::{collections::BTreeMap,env,fs,path::{Path,PathBuf},process::{Command,Stdio},os::windows::process::CommandExt,sync::{Mutex,Arc},time::Duration};
@@ -165,8 +166,12 @@ fn start_update(tracker:tauri::State<'_,Tracker>)->Result<(),String>{
 fn close_after_update(app:tauri::AppHandle,tracker:tauri::State<'_,Tracker>)->Result<(),String>{
  if tracker.0.lock().map_err(|_|"更新状態を取得できません。")?.staged{app.exit(0);Ok(())}else{Err("更新の準備が完了していません。".into())}
 }
+#[tauri::command]
+fn save_traffic_csv(csv:String)->Result<String,String>{if csv.len()>1_000_000{return Err("CSVが大きすぎます。".into())}let dir=root()?.join("data");fs::create_dir_all(&dir).map_err(|e|e.to_string())?;let path=dir.join("traffic-export.csv");fs::write(&path,format!("\u{feff}{csv}")).map_err(|e|e.to_string())?;Ok(path.display().to_string())}
+#[tauri::command]
+async fn traffic_stats(days:u64)->Result<Value,String>{tauri::async_runtime::spawn_blocking(move||traffic::snapshot(days)).await.map_err(|_|"通信統計を読み込めません。".into())}
 fn main(){
- let result=tauri::Builder::default().manage(Tracker::default()).invoke_handler(tauri::generate_handler![load_settings,save_settings,agent_status,agent_action,connection_test,sync_aliases,inspect_sql,update_state,start_update,close_after_update]).run(tauri::generate_context!());
+ let result=tauri::Builder::default().manage(Tracker::default()).invoke_handler(tauri::generate_handler![traffic_stats,save_traffic_csv,load_settings,save_settings,agent_status,agent_action,connection_test,sync_aliases,inspect_sql,update_state,start_update,close_after_update]).run(tauri::generate_context!());
  if result.is_err(){if let Ok(dir)=root(){let _=fs::write(dir.join("mics-only-settings-startup.log"),"設定画面を起動できません。Microsoft Edge WebView2 Runtime を確認してください。\n");}}
 }
 #[cfg(test)]

@@ -1,6 +1,6 @@
 [package]
 name = "mics-only-settings"
-version = "0.2.64"
+version = "0.2.65"
 edition = "2021"
 [features]
 default = ["custom-protocol"]
@@ -13,6 +13,7 @@ ureq = { version = "2", features = ["json"] }
 sha2 = "0.10"
 winreg = "0.55"
 url = "2"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 [build-dependencies]
 tauri-build = "2"
 ico = "0.4"

@@ -29,10 +29,21 @@ fn read(host:&str,port:u16,db_name:&str,user:&str,password:&str,first:&str,end:&
  b.host(host).port(port).db_name(db_name).user(user).pass(password);
  b.with_transaction(|t|t.read_only().no_wait());
  let mut db=b.connect().map_err(|e|e.to_string())?;
- let fields:Vec<(String,)>=db.query(
-  "SELECT TRIM(RDB$FIELD_NAME) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='SCHEDULE'",()
- ).map_err(|e|e.to_string())?;
- let known:BTreeSet<String>=fields.into_iter().map(|(f,)|f.to_ascii_uppercase()).collect();
+ static SCHEDULE_FIELDS:std::sync::OnceLock<BTreeSet<String>>=std::sync::OnceLock::new();
+ let known=match SCHEDULE_FIELDS.get(){
+  Some(fields)=>fields.clone(),
+  None=>{
+   let fields:Vec<(String,)>=db.query(
+    "SELECT TRIM(RDB$FIELD_NAME) FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME='SCHEDULE'",()
+   ).map_err(|e|e.to_string())?;
+   let known:BTreeSet<String>=fields.into_iter().map(|(f,)|f.to_ascii_uppercase()).collect();
+   for field in ["MACHINENO","MACHINESEQ","MORDERNO","PARTSNO","PARTSNAME","TOOLENTRYNO","MSTART","MEND","DELETEFLG","CALCQTYMREMAIN"]{
+    if !known.contains(field){return Err(format!("SCHEDULE missing {field}; keeping previous D1 snapshot"))}
+   }
+   let _=SCHEDULE_FIELDS.set(known.clone());
+   known
+  }
+ };
  for field in ["MACHINENO","MACHINESEQ","MORDERNO","PARTSNO","PARTSNAME","TOOLENTRYNO","MSTART","MEND","DELETEFLG","CALCQTYMREMAIN"]{
   if !known.contains(field){return Err(format!("SCHEDULE missing {field}; keeping previous D1 snapshot"))}
  }
@@ -140,12 +151,12 @@ pub fn upload_if_changed(c:&super::Config,token:&str,grant:&super::Lease,cache:&
         return Ok(true)
     }
     let endpoint=format!("{}/schedule",c.coordinator_url.trim_end_matches('/'));
-    let response=super::client().post(&endpoint)
+    let response=super::traffic::http("schedule",true,||super::client().post(&endpoint)
         .set("Authorization",&format!("Bearer {token}"))
         .set("X-Mics-Agent-Id",&c.agent_id)
         .set("X-Mics-Lease-Token",&grant.lease_token)
         .set("X-Mics-Lease-Epoch",&grant.epoch.to_string())
-        .send_json(payload).map_err(|e|format!("SCHEDULE_UPLOAD_FAILED {e}"))?;
+        .send_json(payload)).map_err(|e|format!("SCHEDULE_UPLOAD_FAILED {e}"))?;
     let result:Value=response.into_json().map_err(|e|e.to_string())?;
     if result["ok"]!=true{return Err("Schedule sync not acknowledged".into())}
     fs::write(ack,digest).map_err(|e|e.to_string())?;

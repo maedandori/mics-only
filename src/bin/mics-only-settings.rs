@@ -2,6 +2,8 @@
 #[path = "../credentials.rs"] mod credentials;
 #[cfg(windows)]
 #[path = "../updater.rs"] mod updater;
+#[cfg(windows)]
+#[path = "../traffic.rs"] mod traffic;
 
 #[cfg(windows)]
 fn main() {

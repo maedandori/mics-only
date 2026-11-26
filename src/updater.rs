@@ -17,10 +17,10 @@ fn parse_version(s:&str)->Option<(u64,u64,u64)>{
  Some((parts[0].parse().ok()?,parts[1].parse().ok()?,parts[2].parse().ok()?))
 }
 fn release()->Result<Option<(String,String,u64,Option<String>)>,String>{
- let info:serde_json::Value=ureq::AgentBuilder::new().timeout(Duration::from_secs(15))
+ let info:serde_json::Value=super::traffic::http("update_check",false,||ureq::AgentBuilder::new().timeout(Duration::from_secs(15))
   .build().get("https://api.github.com/repos/maedandori/mics-only/releases/latest")
   .set("User-Agent","mics-only-updater")
-  .call().map_err(|e|format!("Release check: {e}"))?
+  .call()).map_err(|e|format!("Release check: {e}"))?
   .into_json().map_err(|e|e.to_string())?;
  let tag=info["tag_name"].as_str().ok_or("Missing release tag")?;
  let latest=parse_version(tag).ok_or("Unsupported release version")?;
@@ -66,9 +66,9 @@ pub fn install_with_progress(exe:&Path,mut progress:impl FnMut(u32,&str))->Resul
  let dir=folder.join("data").join("update-staging");
  fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
  let zip=dir.join("MICS-Only-Portable-Windows.zip");
- let response=ureq::AgentBuilder::new().timeout(Duration::from_secs(180))
+ let response=super::traffic::http("update_download",false,||ureq::AgentBuilder::new().timeout(Duration::from_secs(180))
   .build().get(&url).set("User-Agent","mics-only-updater")
-  .call().map_err(|e|format!("Download error: {e}"))?;
+  .call()).map_err(|e|format!("Download error: {e}"))?;
  let mut dst=fs::File::create(&zip).map_err(|e|e.to_string())?;
  let mut reader=response.into_reader().take(120_000_001);
  let mut hasher=Sha256::new();
