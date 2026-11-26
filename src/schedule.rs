@@ -133,6 +133,12 @@ pub fn upload_if_changed(c:&super::Config,token:&str,grant:&super::Lease,cache:&
     let digest=format!("{:x}",Sha256::digest(&bytes));
     let ack=local_path().with_file_name("schedule-last-ack.sha256");
     if fs::read_to_string(&ack).ok().as_deref()==Some(digest.as_str()){return Ok(false)}
+    if !grant.valid(&c.agent_id){return Err("Lease expired before schedule upload".into())}
+    if let Some(result)=super::cloud_socket::call("schedule",&payload,Some(grant)){
+        if result?["ok"]!=true{return Err("Socket schedule not acknowledged".into())}
+        fs::write(ack,digest).map_err(|e|e.to_string())?;
+        return Ok(true)
+    }
     let endpoint=format!("{}/schedule",c.coordinator_url.trim_end_matches('/'));
     let response=super::client().post(&endpoint)
         .set("Authorization",&format!("Bearer {token}"))

@@ -1,6 +1,6 @@
 [package]
 name = "mics-only-settings"
-version = "0.2.63"
+version = "0.2.64"
 edition = "2021"
 [features]
 default = ["custom-protocol"]

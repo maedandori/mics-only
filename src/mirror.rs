@@ -4,10 +4,15 @@ use std::fs;
 pub fn refresh(c:&super::Config,token:&str,local:&super::local_web::LocalState)->Result<(),String>{
     if token.is_empty(){return Err("Mirror credentials unavailable".into())}
     let url=format!("{}/cache",c.coordinator_url.trim_end_matches('/'));
-    let response=super::client().get(&url)
-        .set("Authorization",&format!("Bearer {token}"))
-        .call().map_err(|e|format!("MIRROR_FETCH_FAILED {e}"))?;
-    let body:Value=response.into_json().map_err(|e|e.to_string())?;
+    let body:Value=match super::cloud_socket::call("cache",&json!({}),None){
+        Some(result)=>result?,
+        None=>{
+            let response=super::client().get(&url)
+                .set("Authorization",&format!("Bearer {token}"))
+                .call().map_err(|e|format!("MIRROR_FETCH_FAILED {e}"))?;
+            response.into_json().map_err(|e|e.to_string())?
+        }
+    };
     if body["ok"]!=true{return Err("Mirror was not acknowledged".into())}
     let machines=body["machines"].as_array().ok_or("Mirror machines missing")?;
     if machines.len()!=14{return Err("Mirror must contain 14 machines; keeping previous cache".into())}
