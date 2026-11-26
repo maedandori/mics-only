@@ -99,7 +99,8 @@ function render(node,ctx,app,path,slot){
   Object.assign(instance.props,props);
   return children(parse(component.template).childNodes,scope(null,{...instance.props,...instance.setup,$emit:emit}),app,path+'/component',slotInfo);
  }
- const el=document.createElement(tag);
+ const isSvg=node.namespaceURI==='http://www.w3.org/2000/svg';
+ const el=isSvg?document.createElementNS(node.namespaceURI,node.localName):document.createElement(tag);
  for(const a of node.attributes){const name=a.name,val=a.value;
   if(name==='ref'){let obj=ctx;let item;while(obj&&!item){item=Object.getOwnPropertyDescriptor(obj,val)?.value;obj=Object.getPrototypeOf(obj)}if(item?.[REF])item.value=el;continue}
   if(name==='v-model')continue;
@@ -109,7 +110,7 @@ function render(node,ctx,app,path,slot){
     run(val,ctx,event);later(app)});continue}
   if(name.startsWith(':')){const key=name.slice(1),value=evaluate(val,ctx);
    if(key==='key')continue;
-   if(key==='class'){el.className+=' '+cssClass(value);continue}
+   if(key==='class'){el.setAttribute('class',(el.getAttribute('class')||'')+' '+cssClass(value));continue}
    if(key==='style'&&value&&typeof value==='object'){for(const [k,v] of Object.entries(value))el.style.setProperty(k.startsWith('--')?k:kebab(k),v??'');continue}
    if(key==='value'){el.value=value??'';continue}
    if(key==='disabled'){el.disabled=!!value;continue}

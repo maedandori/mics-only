@@ -525,4 +525,6 @@ patchNextChange(root);
 // Expand local weekly change schedule from Mon-Sat (6d) to Mon-Sun (7d).
 const {patchWeekly7Days}=await import('./patch-weekly-7days.mjs');
 patchWeekly7Days(root);
+const {patchPastelLocal}=await import('./patch-pastel-local.mjs');
+patchPastelLocal(root);
 console.log('Prepared '+count+' original MICS Vue assets for local JSON and offline bundling');

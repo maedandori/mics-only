@@ -18,7 +18,7 @@ writeFileSync(join(output,'assets','compat.css'),'/* Native template, styles gen
 // This preserves the original declarative HTML without runtime eval/new Function
 // and works under the existing Content-Security-Policy script-src 'self'.
 const expressions=new Set(),setters=new Set();
-for(const name of ['dashboard-app.js','change-schedule-app.js','status-colors-app.js','change-aliases-app.js','components.js']){
+for(const name of ['dashboard-app.js','change-schedule-app.js','status-colors-app.js','change-aliases-app.js','components.js','mics-cycle-gauge.js']){
  const source=readFileSync(join(output,'js',name),'utf8');
  const attr=/(?:v-if|v-else-if|v-for|v-model|:[\w-]+|@[\w.-]+)\s*=\s*"([^"]*)"/g;
  for(const match of source.matchAll(attr)){

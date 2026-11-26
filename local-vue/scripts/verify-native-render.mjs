@@ -54,3 +54,9 @@ assert.match(dashboard,/Math\.floor\(anchor\.getHours\(\) \/ scale\.step\) \* sc
 assert.match(dashboard,/d\.hourLabels\.length/,'Gantt template must use per-day hourLabels');
 assert.match(dashboard,/d\.width \+ 'px'/,'Gantt template must use per-day width');
 console.log('PASS original nodes, cached computations, first-paint JSON loading, diagnostics and CSS');
+
+assert.match(dashboard,/mics-pastel-node/);
+assert.match(dashboard,/target_cycle_seconds/);
+assert.match(dashboard,/mics-next-remain/);
+assert.match(runtime,/createElementNS/);
+assert.match(readFileSync(resolve(web,'assets/compiled-expressions.js'),'utf8'),/g\.target/);
