@@ -269,15 +269,31 @@ Local machine nodes now show 次の変更 (型替え / 色替え / 品番替え)
 
 The local Windows agent keeps its loopback `GET /api/live` SSE stream, and additionally exposes a metadata-only `GET /api/json-versions` endpoint for `machines.json`, `schedule-local.json`, and local alias/status-color JSON files. The local dashboard and change-schedule page check these cheap version markers every 8 seconds while the page is open; if a file changed they reload the relevant JSON from the **same PC**, not D1/Turso/Firebird. Browser SSE remains the fastest path and is reconnected automatically. When SSE messages are missed or the socket reports connected but stalls, the version watchdog repairs the UI automatically. A busy dashboard queues missed refreshes. On older agents without the metadata endpoint, a 15–20-second local-only refresh fallback remains active. Versioned assets require one hard page reload when upgrading. The Windows release smoke test opens a real SSE stream, edits `data/machines.json`, and verifies the change event is delivered.
 
-## 0.2.66 — updater bridge (no Launcher/Core split yet)
-Install this normal portable release before the later Launcher/Core migration.
-The old updater can consume its existing ZIP name. **The first upgrade from
-0.2.65 or older still uses the old updater and cannot retroactively gain its
-recovery guarantees. Start it locally in Settings while the agent is standby.**
-After the bridge is installed, the new updater backs up the running binaries
-and web entry files before stopping, validates release files, prevents
-concurrent application, scopes process termination to this installation, and
-restarts the last working version on failed startup. INI, DPAPI and snapshots
-are never overwritten. Migration packages are accepted only from Settings,
-require SHA256 and a fresh Worker acknowledgement from the new Core before
-success. Do not publish the Core migration until this bridge is deployed.
+## Launcher/Core migration (0.2.67)
+First install the v0.2.66 updater bridge while it is the latest legacy release.
+After the bridge is verified on the target PC, use its Settings Update button to
+install the separate Launcher package. The bridge backs up the old EXEs and
+restores them if the new Core cannot report a fresh authenticated Worker ACK.
+Never attempt the migration through legacy Admin updates. PCs still on v0.2.65
+or earlier need the v0.2.66 bridge installed first (or manual Launcher install).
+Manual alternative: stop the old agent/settings, preserve mics.ini, data, and
+Windows-user DPAPI credentials, back up old executables, then extract the new
+Launcher ZIP into the same directory. Do not overwrite existing Core slots.
+Test standby first, never migrate all agents at once.
+
+mics-only.exe is the stable supervisor (launcher protocol 1.0.0).
+mics-core-a.exe / mics-core-b.exe are separate executables beside it so all
+existing relative data paths remain unchanged. A Windows Job Object ensures
+Core shutdown when the launcher exits. Independent Core packages are verified
+against the mandatory GitHub asset SHA256, extracted and checked before switching.
+Only STANDBY/MIRROR_ONLY may switch; the old child is stopped before starting
+the candidate. A candidate must return its own local API version/PID and receive
+a cloud presence ACK before being promoted. A failing candidate leaves the
+previous active Core intact; a failed version is blocked automatically.
+The launcher does not acquire a Firebird lease. The old Core reports its own
+presence while running; the launcher sends a compatibility HTTP presence only
+when no Core is alive. Machine-control must be upgraded to the companion Launcher/Core Admin protocol
+to distinguish launcher presence from Core readiness and authorize independent
+Core packages. Legacy agents still report their existing fields. Local status and logs: data/launcher-status.json,
+data/launcher.log, launcher-startup.log. Core version state is stored in
+data/core-state.json; do not delete it or manually replace active slots.

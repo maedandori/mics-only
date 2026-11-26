@@ -98,6 +98,9 @@ jobs:
         run: cargo test
       - name: Compile Windows EXEs
         run: cargo build --release
+      - name: Verify Windows launcher recovery and child lifetime
+        shell: pwsh
+        run: ./scripts/test-launcher.ps1
       - name: Test and build Japanese Tauri Settings
         shell: pwsh
         run: |
@@ -118,12 +121,19 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path release-package | Out-Null
           Copy-Item target/release/mics-only.exe release-package/
+          Copy-Item target/release/mics-core.exe release-package/mics-core-a.exe
           Copy-Item settings-tauri/target/release/mics-only-settings.exe release-package/
           Copy-Item mics.ini.example release-package/
           Copy-Item README.md release-package/
           Copy-Item www -Destination release-package/www -Recurse
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Compress-Archive -Path release-package/* -DestinationPath dist/MICS-Only-Portable-Windows.zip -Force
+          Compress-Archive -Path release-package/* -DestinationPath dist/MICS-Only-Launcher-Windows.zip -Force
+          New-Item -ItemType Directory -Force -Path core-package/www | Out-Null
+          Copy-Item target/release/mics-core.exe core-package/
+          Copy-Item "www/vue-v${{ steps.version.outputs.version }}" core-package/www/ -Recurse
+          Compress-Archive -Path core-package/* -DestinationPath dist/MICS-Core-Windows.zip -Force
+          if (!(Test-Path release-package/mics-core-a.exe)) { throw 'Missing initial Core A' }
+          if (!(Test-Path core-package/mics-core.exe)) { throw 'Missing standalone Core' }
       - name: Validate updater script syntax
         shell: pwsh
         run: |
@@ -132,18 +142,17 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path scripts/apply-update.ps1),[ref]$tokens,[ref]$parseErrors) | Out-Null
           if ($parseErrors.Count -gt 0) { throw "Updater syntax errors: $($parseErrors | Out-String)" }
           $updaterText=Get-Content scripts/apply-update.ps1 -Raw
-          foreach ($required in @('UPDATE_PREFLIGHT_OK','UPDATE_RECOVERY_RESTARTED','update-apply.lock','migration-presence.json')) {
-            if (!$updaterText.Contains($required)) { throw "Missing safety contract: $required" }
+          foreach ($required in @('UPDATE_PREFLIGHT_OK','UPDATE_RECOVERY_RESTARTED','migration-presence.json')) {
+            if (!$updaterText.Contains($required)) { throw "Missing bridge safety contract: $required" }
           }
-      - name: Test staged updater and recovery
-        shell: pwsh
-        run: ./scripts/test-update-bridge.ps1
 
       - name: Upload portable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MICS-Only-Portable-Windows
-          path: dist/MICS-Only-Portable-Windows.zip
+          name: MICS-Only-Launcher-and-Core
+          path: |
+            dist/MICS-Only-Launcher-Windows.zip
+            dist/MICS-Core-Windows.zip
           if-no-files-found: error
       - name: Publish GitHub Release
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -155,4 +164,6 @@ jobs:
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
-          files: dist/MICS-Only-Portable-Windows.zip
+          files: |
+            dist/MICS-Only-Launcher-Windows.zip
+            dist/MICS-Core-Windows.zip

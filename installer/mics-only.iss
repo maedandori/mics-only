@@ -20,6 +20,7 @@ UninstallDisplayIcon={app}\mics-only.exe
 
 [Files]
 Source: "..\target\release\mics-only.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\target\release\mics-core.exe"; DestDir: "{app}"; DestName: "mics-core-a.exe"; Flags: onlyifdoesntexist
 Source: "..\target\release\mics-only-settings.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\mics.ini.example"; DestDir: "{app}"; DestName: "mics.ini"; Flags: onlyifdoesntexist
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion

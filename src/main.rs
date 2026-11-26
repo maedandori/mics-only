@@ -1,8 +1,6 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 #[cfg(windows)]
 mod credentials;
-#[cfg(windows)]
-mod updater;
 mod local_web;
 mod schedule;
 mod change_schedule;
@@ -111,9 +109,19 @@ fn presence(c:&Config,coordinator_token:&str,alias_ack:Option<i64>)->Result<Valu
  if coordinator_token.is_empty()||c.coordinator_url.is_empty(){return Err("Presence credentials missing".into())}
  let url=url::Url::parse(&c.coordinator_url).map_err(|e|e.to_string())?;
  if url.scheme()!="https"||url.host_str().is_none(){return Err("Invalid coordinator URL".into())}
- let payload=json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled,"version":env!("CARGO_PKG_VERSION"),"alias_sync_ack":alias_ack,
+ let mut payload=json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled,"version":reported_core_version(),"alias_sync_ack":alias_ack,
    "update_failed_version":env::current_exe().ok().and_then(|p|p.parent().map(|dir|dir.join("data").join("update-blocked-version.txt"))).and_then(|p|fs::read_to_string(p).ok()).map(|v|v.trim().trim_start_matches('v').to_owned())});
- if let Some(result)=cloud_socket::call("presence",&payload,None){return result}
+ if let Ok(launcher)=env::var("MICS_LAUNCHER_VERSION"){
+    let status=core_data_path("launcher-status.json").and_then(|p|fs::read(p).ok()).and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or_default();
+    payload["launcher_version"]=json!(launcher);
+    payload["core_state"]=json!(if core_trial_pending(){"trial"}else{"running"});
+    payload["core_phase"]=if core_trial_pending(){json!("UPDATING")}else{status["phase"].clone()};
+    payload["previous_core_version"]=status["previous_core_version"].clone();
+ }
+ if let Some(result)=cloud_socket::call("presence",&payload,None){
+   if result.is_ok(){record_core_presence();}
+   return result
+ }
  let result=traffic::http("presence",true,||client().post(&format!("{}/presence",c.coordinator_url.trim_end_matches('/')))
   .set("Authorization",&format!("Bearer {coordinator_token}"))
   .send_json(payload))
@@ -125,7 +133,9 @@ fn presence(c:&Config,coordinator_token:&str,alias_ack:Option<i64>)->Result<Valu
       other => format!("PRESENCE_FAILED {other}")
   })?;
  if result.status()!=200{return Err(format!("PRESENCE_HTTP_{}",result.status()))}
- result.into_json().map_err(|e|format!("Bad presence reply: {e}"))
+ let reply=result.into_json().map_err(|e|format!("Bad presence reply: {e}"));
+ if reply.is_ok(){record_core_presence();}
+ reply
 }
 thread_local!{
     static LEASE_CACHE: std::cell::RefCell<(Option<Lease>,Option<std::time::Instant>,Option<std::time::Instant>)> =
@@ -399,26 +409,37 @@ fn remote_alias_sync_request(response:&Value,local:&local_web::LocalState){
   Err(e)=>eprintln!("ALIAS_D1_SYNC_FAILED command_id={id} {e}")
  }
 }
+fn core_data_path(name:&str)->Option<std::path::PathBuf>{
+    env::current_exe().ok().and_then(|p|p.parent().map(|d|d.join("data").join(name)))
+}
+fn core_trial_pending()->bool{
+    env::var_os("MICS_TRIAL_OLD_VERSION").is_some()&&!env::var("MICS_TRIAL_TOKEN").ok().and_then(|t|core_data_path(&format!("core-promoted-{t}"))).is_some_and(|p|p.is_file())
+}
+fn reported_core_version()->String{
+    if core_trial_pending(){if let Ok(previous)=env::var("MICS_TRIAL_OLD_VERSION"){return previous}}
+    env!("CARGO_PKG_VERSION").into()
+}
+fn record_core_presence(){
+    if env::var_os("MICS_SUPERVISED").is_some(){
+        if let Some(path)=core_data_path("migration-presence.json"){
+            let receipt=json!({"pid":std::process::id(),"version":env!("CARGO_PKG_VERSION"),"ack":true,"ack_at_ms":chrono::Utc::now().timestamp_millis()});
+            if let Some(parent)=path.parent(){let _=fs::create_dir_all(parent);}
+            let tmp=path.with_extension("tmp");
+            if fs::write(&tmp,receipt.to_string()).is_ok(){let _=fs::rename(&tmp,&path);}
+        }
+    }
+    let Ok(token)=env::var("MICS_TRIAL_TOKEN") else{return};
+    if let Some(path)=core_data_path(&format!("core-presence-{token}")){
+        if let Some(parent)=path.parent(){let _=fs::create_dir_all(parent);}
+        let _=fs::write(path,env!("CARGO_PKG_VERSION"));
+    }
+}
 #[cfg(windows)]
 fn remote_update_request(response:&Value,local:&local_web::LocalState){
-    use std::sync::atomic::{AtomicBool,Ordering};
-    static CHECKING: AtomicBool=AtomicBool::new(false);
     if response["update_requested"]!=true{return}
     let mode=local.mode.lock().ok().map(|s|s.clone()).unwrap_or_default();
     if mode!="MIRROR_ONLY"&&mode!="STANDBY"{return}
-    if CHECKING.swap(true,Ordering::SeqCst){return}
-    let state=local.clone();
-    thread::spawn(move ||{
-        if let Ok(exe)=env::current_exe(){
-            let safe=state.mode.lock().ok().is_some_and(|mode|mode.as_str()=="MIRROR_ONLY"||mode.as_str()=="STANDBY");
-            if safe {
-                if let Err(e)=updater::install_if_available(&exe){
-                    eprintln!("ADMIN_UPDATE_FAILED {e}");
-                }
-            }
-        }
-        CHECKING.store(false,Ordering::SeqCst);
-    });
+    if let Some(path)=core_data_path("core-update.request"){let _=fs::write(path,"admin");}
 }
 fn run(c: Config) -> Result<(), String> {
     // Always serve the local dashboard, even when standby is disabled or lease denied.
@@ -441,30 +462,6 @@ fn run(c: Config) -> Result<(), String> {
     // Fetch alias from D1 in the agent, not from the browser. Works in standby,
     // active and mirror-only modes and never blocks the web UI.
     local_web::start_alias_sync(local.clone());
-    // Check GitHub every six hours; postpone while ACTIVE (Firebird lease holder).
-    // Update applies only to this standby agent; the independent print agent is untouched.
-    #[cfg(windows)]
-    {
-        let state=local.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_secs(300));
-            loop {
-                let safe=state.mode.lock().map(|m|m.as_str()!="ACTIVE").unwrap_or(false);
-                if safe {
-                    if let Ok(exe)=env::current_exe(){
-                        match updater::install_if_available(&exe){
-                            Ok(result) if result.starts_with("UPDATE_STAGED ")=>{
-                                println!("{result}");
-                            },
-                            Ok(_)=>{},
-                            Err(e)=>eprintln!("AUTO_UPDATE_CHECK_FAILED {e}")
-                        }
-                    }
-                }
-                thread::sleep(Duration::from_secs(21600));
-            }
-        });
-    }
     if !c.enabled {
         // Safe MIRROR_ONLY mode: local dashboard can show the primary's
         // authenticated Cloudflare cache while NEVER opening Firebird or
@@ -835,6 +832,17 @@ fn inspect_database(c:&Config, password:&str, sql:Option<&str>) -> Result<String
 }
 
 fn main() {
+    if env::args().any(|arg|arg=="--core-version"){println!("{}",env!("CARGO_PKG_VERSION"));return}
+    #[cfg(windows)]
+    let _core_lock=if env::args().len()==1 {
+        use std::os::windows::fs::OpenOptionsExt;
+        if env::var_os("MICS_SUPERVISED").is_none(){eprintln!("Start mics-only.exe instead");std::process::exit(1)}
+        let path=core_data_path("core-process.lock").expect("Core data directory");
+        if let Some(parent)=path.parent(){let _=fs::create_dir_all(parent);}
+        match fs::OpenOptions::new().read(true).write(true).create(true).share_mode(0).open(path){
+            Ok(f)=>Some(f),Err(_)=>{eprintln!("Another Core already owns the installation");std::process::exit(1)}
+        }
+    }else{None};
     let result = Config::load().and_then(|c| {
         if env::args().any(|arg|arg=="--sql-query") {
             let file=env::args().skip_while(|x|x!="--sql-query").nth(1).ok_or("SQL file missing")?;
