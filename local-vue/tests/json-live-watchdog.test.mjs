@@ -85,6 +85,12 @@ test('header countdown uses the real agent cycle without DB requests',()=>{
  assert.ok(agent.includes('local.schedule_next_poll(if valid_url&&!mirror_secret.is_empty(){Some(mirror_wait)}else{None})'))
  assert.ok(agent.includes('remaining_poll_seconds(last_mirror,STANDBY_MIRROR_SECONDS)'))
  assert.ok(agent.includes('remaining_poll_seconds(schedule_polled_at,ACTIVE_SCHEDULE_SECONDS)'))
+ // The independent schedule deadline must affect both the lease-only sleep
+ // and the real data countdown, not simply appear in an unused expression.
+ assert.match(agent,/let data_wait=remaining_poll_seconds\(last_data_poll,active_poll_seconds\)\s*\.min\(remaining_poll_seconds\(schedule_polled_at,ACTIVE_SCHEDULE_SECONDS\)\)/)
+ assert.match(agent,/next_data_wait=remaining_poll_seconds\(last_data_poll,active_poll_seconds\)\s*\.min\(remaining_poll_seconds\(schedule_polled_at,ACTIVE_SCHEDULE_SECONDS\)\)/)
+ assert.match(agent,/&& schedule_polled_at\.is_some_and\(\|at\|at\.elapsed\(\)<Duration::from_secs\(ACTIVE_SCHEDULE_SECONDS\)\)/)
+ assert.ok(agent.includes('next_wait=next_data_wait.min(lease_wait_seconds())'))
  assert.ok(agent.includes('thread::sleep(Duration::from_secs(next_wait))'))
  assert.ok(!agent.includes('local.schedule_next_poll(Some(c.interval))'))
 })

@@ -8,6 +8,7 @@ mod schedule;
 mod change_schedule;
 mod materials;
 mod mirror;
+mod cloud_socket;
 use chrono::{DateTime, Utc};
 use rsfbclient::prelude::*;
 use serde::Deserialize;
@@ -78,12 +79,13 @@ impl Config {
         Ok(())
     }
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct Lease {
     granted: bool,
     #[serde(default)] epoch: u64,
     #[serde(default)] lease_token: String,
     #[serde(default)] expires_at: String,
+    #[serde(default)] retry_after_ms: u64,
 }
 impl Lease {
     fn valid(&self, agent_id: &str) -> bool {
@@ -106,10 +108,12 @@ fn presence(c:&Config,coordinator_token:&str,alias_ack:Option<i64>)->Result<Valu
  if coordinator_token.is_empty()||c.coordinator_url.is_empty(){return Err("Presence credentials missing".into())}
  let url=url::Url::parse(&c.coordinator_url).map_err(|e|e.to_string())?;
  if url.scheme()!="https"||url.host_str().is_none(){return Err("Invalid coordinator URL".into())}
+ let payload=json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled,"version":env!("CARGO_PKG_VERSION"),"alias_sync_ack":alias_ack,
+   "update_failed_version":env::current_exe().ok().and_then(|p|p.parent().map(|dir|dir.join("data").join("update-blocked-version.txt"))).and_then(|p|fs::read_to_string(p).ok()).map(|v|v.trim().trim_start_matches('v').to_owned())});
+ if let Some(result)=cloud_socket::call("presence",&payload,None){return result}
  let result=client().post(&format!("{}/presence",c.coordinator_url.trim_end_matches('/')))
   .set("Authorization",&format!("Bearer {coordinator_token}"))
-  .send_json(json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled,"version":env!("CARGO_PKG_VERSION"),"alias_sync_ack":alias_ack,
-   "update_failed_version":env::current_exe().ok().and_then(|p|p.parent().map(|dir|dir.join("data").join("update-blocked-version.txt"))).and_then(|p|fs::read_to_string(p).ok()).map(|v|v.trim().trim_start_matches('v').to_owned())}))
+  .send_json(payload)
   .map_err(|e|match e {
       ureq::Error::Status(status, response) => {
           let detail=response.into_string().unwrap_or_default();
@@ -120,15 +124,52 @@ fn presence(c:&Config,coordinator_token:&str,alias_ack:Option<i64>)->Result<Valu
  if result.status()!=200{return Err(format!("PRESENCE_HTTP_{}",result.status()))}
  result.into_json().map_err(|e|format!("Bad presence reply: {e}"))
 }
+thread_local!{
+    static LEASE_CACHE: std::cell::RefCell<(Option<Lease>,Option<std::time::Instant>,Option<std::time::Instant>)> =
+        std::cell::RefCell::new((None,None,None));
+}
+// A cached lease remains a server grant, not a local election. Refresh only
+// when due or when the remaining time is too short to begin another operation.
 fn acquire(c: &Config, coordinator_token: &str) -> Result<Option<Lease>, String> {
-    let response = client().post(&format!("{}/lease", c.coordinator_url.trim_end_matches('/')))
-        .set("Authorization", &format!("Bearer {coordinator_token}"))
-        .send_json(json!({"agent_id":c.agent_id,"role":"backup","ttl_seconds":45}))
-        .map_err(|e| format!("LEASE_REQUEST_FAILED {e}"))?;
-    let lease: Lease = response.into_json().map_err(|e| format!("Invalid lease response: {e}"))?;
-    if !lease.granted {return Ok(None)}
-    if !lease.valid(&c.agent_id) {return Err("Invalid/expired coordinator lease; refusing Firebird access".into())}
-    Ok(Some(lease))
+    LEASE_CACHE.with(|cell|{
+        let mut state=cell.borrow_mut();
+        let now=std::time::Instant::now();
+        if let (Some(lease),Some(at))=(&state.0,state.1){
+            let remaining=DateTime::parse_from_rfc3339(&lease.expires_at).ok()
+                .map(|expiry|expiry.with_timezone(&Utc).signed_duration_since(Utc::now()).num_seconds()).unwrap_or(0);
+            if at.elapsed()<Duration::from_secs(30)&&remaining>15&&lease.valid(&c.agent_id){return Ok(Some(lease.clone()))}
+        }
+        if state.0.is_none()&&state.2.is_some_and(|at|at>now){return Ok(None)}
+        // Never continue using a previous token after a failed renewal.
+        *state=(None,None,None);
+        let payload=json!({"agent_id":c.agent_id,"role":"backup","ttl_seconds":60});
+        let lease:Lease=match cloud_socket::call("lease",&payload,None){
+            Some(result)=>serde_json::from_value(result?).map_err(|_|"Invalid socket lease response".to_string())?,
+            None=>{
+                // The old HTTP server accepts only TTL=45; keep mixed versions safe.
+                let response=client().post(&format!("{}/lease",c.coordinator_url.trim_end_matches('/')))
+                    .set("Authorization",&format!("Bearer {coordinator_token}"))
+                    .send_json(json!({"agent_id":c.agent_id,"role":"backup","ttl_seconds":45}))
+                    .map_err(|e|format!("LEASE_REQUEST_FAILED {e}"))?;
+                response.into_json().map_err(|_|"Invalid HTTP lease response".to_string())?
+            }
+        };
+        if !lease.granted{
+            let delay=if lease.retry_after_ms==0{20000}else{lease.retry_after_ms.clamp(5000,60000)};
+            state.2=Some(std::time::Instant::now()+Duration::from_millis(delay));
+            return Ok(None)
+        }
+        if !lease.valid(&c.agent_id){return Err("Invalid/expired coordinator lease; refusing Firebird access".into())}
+        state.0=Some(lease.clone());state.1=Some(std::time::Instant::now());
+        Ok(Some(lease))
+    })
+}
+fn lease_wait_seconds()->u64{
+    LEASE_CACHE.with(|cell|{
+        let state=cell.borrow();
+        if let Some(at)=state.1{return 30u64.saturating_sub(at.elapsed().as_secs()).max(1)}
+        state.2.map(|at|at.saturating_duration_since(std::time::Instant::now()).as_secs().max(1)).unwrap_or(20)
+    })
 }
 fn read(c: &Config, password: &str) -> Result<Value, String> {
     let mut b = rsfbclient::builder_pure_rust();
@@ -330,6 +371,10 @@ fn changed_cloud_machines(machines: &[Value], previous: &BTreeMap<i32, CloudMach
     out
 }
 fn upload(c: &Config, sync_token: &str, lease: &Lease, snapshot: Value) -> Result<(), String> {
+    if !lease.valid(&c.agent_id){return Err("Lease expired before upload".into())}
+    if let Some(result)=cloud_socket::call("sync",&snapshot,Some(lease)){
+        return if result?["ok"]==true{Ok(())}else{Err("Socket sync not acknowledged".into())}
+    }
     let response = client().post(&format!("{}/sync", c.coordinator_url.trim_end_matches('/')))
         .set("Authorization", &format!("Bearer {sync_token}"))
         .set("X-Mics-Agent-Id", &c.agent_id)
@@ -432,6 +477,7 @@ fn run(c: Config) -> Result<(), String> {
         #[cfg(not(windows))]
         let presence_secret=env::var("MICS_COORDINATOR_TOKEN").unwrap_or_default();
 
+        if !mirror_secret.is_empty()&&!presence_secret.is_empty(){cloud_socket::configure(&c,&presence_secret,&mirror_secret);}
         let valid_url=url::Url::parse(&c.coordinator_url).ok()
             .is_some_and(|u|u.scheme()=="https"&&u.host_str().is_some()
                 &&u.username()==""&&u.password().is_none());
@@ -476,6 +522,7 @@ fn run(c: Config) -> Result<(), String> {
         secret("MICS_SYNC_TOKEN")?,
         secret("MICS_COORDINATOR_TOKEN")?,
     );
+    cloud_socket::configure(&c,&coordinator_token,&sync_token);
     let mut previous_hash = String::new();
     let mut previous_cloud_state: BTreeMap<i32, CloudMachineBaseline> = BTreeMap::new();
     let mut last_mirror:Option<std::time::Instant>=None;
@@ -483,6 +530,7 @@ fn run(c: Config) -> Result<(), String> {
     let mut materials_polled_at:Option<std::time::Instant>=None;
     let mut materials_sync_failed=false;
     let mut last_presence:Option<std::time::Instant>=None;
+    let mut last_data_poll:Option<std::time::Instant>=None;
     loop {
         local.schedule_next_poll(None); // Current agent cycle is in progress.
         if last_presence.map(|t|t.elapsed()>=Duration::from_secs(60)).unwrap_or(true){
@@ -500,6 +548,16 @@ fn run(c: Config) -> Result<(), String> {
                 local.set_mode("ACTIVE");
                 local.set_poll_interval(active_poll_seconds);
                 last_mirror=None;
+                // A lease-only wake-up must not skip a due production OR schedule poll.
+                if last_data_poll.is_some_and(|at|at.elapsed()<Duration::from_secs(active_poll_seconds))
+                    && schedule_polled_at.is_some_and(|at|at.elapsed()<Duration::from_secs(ACTIVE_SCHEDULE_SECONDS)){
+                    let data_wait=remaining_poll_seconds(last_data_poll,active_poll_seconds)
+                        .min(remaining_poll_seconds(schedule_polled_at,ACTIVE_SCHEDULE_SECONDS));
+                    local.schedule_next_poll(Some(data_wait));
+                    thread::sleep(Duration::from_secs(data_wait.min(lease_wait_seconds())));
+                    continue
+                }
+                last_data_poll=Some(std::time::Instant::now());
                 let material_refresh_seconds=if materials_sync_failed {300}else{86400};
                 if materials_polled_at.map(|t|t.elapsed()>=Duration::from_secs(material_refresh_seconds)).unwrap_or(true){
                     materials_polled_at=Some(std::time::Instant::now());
@@ -539,6 +597,12 @@ fn run(c: Config) -> Result<(), String> {
                             }
                         }
                     }
+                }
+                // Refresh a near-expiry grant before opening another Firebird connection.
+                let read_grant=acquire(&c,&coordinator_token);
+                if !matches!(read_grant,Ok(Some(ref grant)) if grant.epoch==lease.epoch){
+                    local.set_mode("STANDBY");local.record_sync("LEASE_LOST");
+                    thread::sleep(Duration::from_secs(lease_wait_seconds()));continue
                 }
                 match read(&c, &db_password) {
                     Ok(mut data) => {
@@ -584,15 +648,17 @@ fn run(c: Config) -> Result<(), String> {
                     }
                     Err(e) => {local.record_sync("READ_FAILED");eprintln!("MICS_READ_FAILED {e}");},
                 }
-                next_wait=active_poll_seconds.min(remaining_poll_seconds(schedule_polled_at,ACTIVE_SCHEDULE_SECONDS));
-                next_data_wait=next_wait;
+                // UI reports the next local data update, not a lease renewal.
+                next_data_wait=remaining_poll_seconds(last_data_poll,active_poll_seconds)
+                    .min(remaining_poll_seconds(schedule_polled_at,ACTIVE_SCHEDULE_SECONDS));
+                next_wait=next_data_wait.min(lease_wait_seconds());
             }
             Ok(None) => {
                 local.set_mode("STANDBY");
                 local.set_poll_interval(STANDBY_MIRROR_SECONDS);
                 previous_hash.clear();
                 previous_cloud_state.clear();
-                schedule_polled_at=None;
+                schedule_polled_at=None;last_data_poll=None;
                 if last_mirror.map(|t|t.elapsed()>=Duration::from_secs(STANDBY_MIRROR_SECONDS)).unwrap_or(true){
                     last_mirror=Some(std::time::Instant::now());
                     if let Err(e)=mirror::refresh(&c,&sync_token,&local){
@@ -601,9 +667,9 @@ fn run(c: Config) -> Result<(), String> {
                 }
                 next_data_wait=remaining_poll_seconds(last_mirror,STANDBY_MIRROR_SECONDS);
                 // Keep the lease election cadence independent of mirror downloads.
-                next_wait=active_poll_seconds.min(next_data_wait);
+                next_wait=lease_wait_seconds().min(next_data_wait);
             }
-            Err(e) => { local.set_mode("OFFLINE"); previous_hash.clear(); previous_cloud_state.clear(); schedule_polled_at=None; last_mirror=None; eprintln!("{e}"); }
+            Err(e) => { local.set_mode("OFFLINE"); previous_hash.clear(); previous_cloud_state.clear(); schedule_polled_at=None; last_data_poll=None; last_mirror=None; eprintln!("{e}"); }
         }
         local.schedule_next_poll(Some(next_data_wait));
         thread::sleep(Duration::from_secs(next_wait));
@@ -758,11 +824,11 @@ fn main() {
 mod tests {
     use super::*;
     #[test] fn denied_lease_is_not_valid() {
-        let l = Lease {granted:false, epoch:1, lease_token:"a".repeat(32), expires_at:"2099-01-01T00:00:00Z".into()};
+        let l = Lease {granted:false, epoch:1, lease_token:"a".repeat(32), expires_at:"2099-01-01T00:00:00Z".into(), retry_after_ms:0};
         assert!(!l.valid("backup"));
     }
     #[test] fn empty_lease_is_not_valid() {
-        let l = Lease {granted:true, epoch:1, lease_token:"".into(), expires_at:"2099-01-01T00:00:00Z".into()};
+        let l = Lease {granted:true, epoch:1, lease_token:"".into(), expires_at:"2099-01-01T00:00:00Z".into(), retry_after_ms:0};
         assert!(!l.valid("backup"));
     }
     #[test] fn critical_change_detection_filters_shot_counter_noise() {
