@@ -819,11 +819,11 @@ fn main() {
 mod tests {
     use super::*;
     #[test] fn denied_lease_is_not_valid() {
-        let l = Lease {granted:false, epoch:1, lease_token:"a".repeat(32), expires_at:"2099-01-01T00:00:00Z".into()};
+        let l = Lease {granted:false, epoch:1, lease_token:"a".repeat(32), expires_at:"2099-01-01T00:00:00Z".into(), retry_after_ms:0};
         assert!(!l.valid("backup"));
     }
     #[test] fn empty_lease_is_not_valid() {
-        let l = Lease {granted:true, epoch:1, lease_token:"".into(), expires_at:"2099-01-01T00:00:00Z".into()};
+        let l = Lease {granted:true, epoch:1, lease_token:"".into(), expires_at:"2099-01-01T00:00:00Z".into(), retry_after_ms:0};
         assert!(!l.valid("backup"));
     }
     #[test] fn critical_change_detection_filters_shot_counter_noise() {
