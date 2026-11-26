@@ -2,6 +2,7 @@
 //! uncertain write over HTTP in the same call; existing sync retries later.
 use std::{cell::RefCell,net::{TcpStream,ToSocketAddrs},time::{Duration,Instant}};
 use serde_json::{json,Value};
+use super::traffic;
 use tungstenite::{client::IntoClientRequest,stream::MaybeTlsStream,Message,WebSocket};
 type Socket=WebSocket<MaybeTlsStream<TcpStream>>;
 struct Channel{
@@ -34,7 +35,15 @@ impl Channel{
   headers.insert("authorization",format!("Bearer {}",self.coordinator).parse().map_err(|_|"Invalid coordinator credential")?);
   headers.insert("x-mics-sync-token",self.sync.parse().map_err(|_|"Invalid sync credential")?);
   headers.insert("x-mics-agent-id",self.agent_id.parse().map_err(|_|"Invalid agent ID")?);
-  tungstenite::client_tls_with_config(request,tcp,None,None).map(|(ws,_)|ws).map_err(|_|"Socket handshake unavailable".into())
+  traffic::record("socket","worker_http",1);
+  traffic::record("socket","ws_handshake",1);
+  let result=tungstenite::client_tls_with_config(request,tcp,None,None);
+  match &result{
+   Ok(_)=>{traffic::record("socket","worker_http_response",1);traffic::record("socket","ws_connected",1);},
+   Err(tungstenite::Error::Http(_))=>{traffic::record("socket","worker_http_response",1);traffic::record("socket","http_error",1);traffic::record("socket","ws_error",1);},
+   Err(_)=>{traffic::record("socket","ws_error",1);}
+  }
+  result.map(|(ws,_)|ws).map_err(|_|"Socket handshake unavailable".into())
  }
  fn failed(&mut self){
   self.socket=None;self.next_connect=Instant::now()+Duration::from_secs(self.backoff);
@@ -51,14 +60,19 @@ impl Channel{
   if let Some(lease)=lease{msg["epoch"]=json!(lease.epoch);msg["lease_token"]=json!(lease.lease_token);}
   let result=(||->Result<(u64,Value),String>{
    let ws=self.socket.as_mut().ok_or("Socket unavailable")?;
+   traffic::record(op,"ws_attempt",1);
    ws.send(Message::Text(msg.to_string())).map_err(|_|"Socket send failed")?;
+   traffic::record(op,"ws_sent",1);
    let deadline=Instant::now()+Duration::from_secs(8);
    while Instant::now()<deadline{
     match ws.read().map_err(|_|"Socket response failed")?{
      Message::Text(text)=>{
+      traffic::record(op,"ws_received",1);
       let response:Value=serde_json::from_str(&text).map_err(|_|"Invalid socket response")?;
       if response["id"].as_u64()!=Some(id){return Err("Socket ACK ID mismatch".into())}
-      return Ok((response["status"].as_u64().ok_or("Socket ACK status missing")?,response["data"].clone()))
+      let status=response["status"].as_u64().ok_or("Socket ACK status missing")?;
+      if traffic::has_turso(op){traffic::receipt(op,&response["traffic"]);}
+      return Ok((status,response["data"].clone()))
      },
      Message::Ping(_)=>{ws.flush().map_err(|_|"Socket pong failed")?;},
      Message::Close(_)=>return Err("Socket closed".into()),
@@ -69,8 +83,8 @@ impl Channel{
   })();
   match result{
    Ok((status,data)) if (200..300).contains(&status)=>Some(Ok(data)),
-   Ok((status,_))=>Some(Err(format!("MICS_SOCKET_HTTP_{status}"))),
-   Err(e)=>{self.failed();Some(Err(e))}
+   Ok((status,_))=>{traffic::record(op,"ws_error",1);Some(Err(format!("MICS_SOCKET_HTTP_{status}")))},
+   Err(e)=>{traffic::record(op,"ws_error",1);if traffic::has_turso(op){traffic::record(op,"turso_receipt_missing",1);}self.failed();Some(Err(e))}
   }
  }
 }

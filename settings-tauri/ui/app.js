@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id),invoke=(name,args)=>window.__TAURI__.cor
 const fields=['enabled','display_name','agent_id','host','port','database','user','coordinator_url','interval_seconds','autostart','password','sync_token','coordinator_token'];
 const checks=new Set(['enabled','autostart']),secretKeys=['password','sync_token','coordinator_token'];
 const actions=['save','saveRestart','start','stop','restart','web','test','aliases','update','runSql','exportSql'];
-const headings={general:['一般設定','端末と予備機の動作を設定します。'],connection:['接続設定','データベースと調整サーバーを設定します。'],secrets:['認証情報','接続に必要な認証情報を安全に管理します。'],sync:['同期・更新','同期間隔、別名・状態色、バージョンを管理します。'],sql:['データベース調査','読み取り専用でデータを確認・保存します。']};
+const headings={general:['一般設定','端末と予備機の動作を設定します。'],connection:['接続設定','データベースと調整サーバーを設定します。'],secrets:['認証情報','接続に必要な認証情報を安全に管理します。'],sync:['同期・更新','同期間隔、別名・状態色、バージョンを管理します。'],traffic:['通信統計','Worker・WebSocket・Turso・Firebirdの時間別通信を確認します。'],sql:['データベース調査','読み取り専用でデータを確認・保存します。']};
 const modes={ACTIVE:'稼働中',STANDBY:'待機中',MIRROR_ONLY:'閲覧専用',OFFLINE:'未接続'};
 let ready=false,busy=false,updating=false,checking=false;
 function say(message,error=false){$('message').textContent=String(message);$('message').classList.toggle('error',error)}
@@ -14,7 +14,7 @@ async function status(){if(checking||busy||updating)return;checking=true;try{con
 async function run(work){if(!ready||busy||updating)return;busy=true;controls();try{await work()}catch(e){say(e,true)}finally{busy=false;controls();void status()}}
 async function save(){await invoke('save_settings',{form:getForm()});for(const key of secretKeys)$(key).value='';const data=await invoke('load_settings');$('vaultState').textContent=data.credentials_configured?'保存済み':'未設定';dirty(false)}
 for(const field of fields)$(field).addEventListener('input',()=>dirty(true));
-for(const item of document.querySelectorAll('.nav'))item.addEventListener('click',()=>{const tab=item.dataset.tab;for(const b of document.querySelectorAll('.nav'))b.classList.toggle('active',b===item);for(const p of document.querySelectorAll('.panel'))p.hidden=p.id!==tab;$('heading').textContent=headings[tab][0];$('subtitle').textContent=headings[tab][1]});
+for(const item of document.querySelectorAll('.nav'))item.addEventListener('click',()=>{const tab=item.dataset.tab;for(const b of document.querySelectorAll('.nav'))b.classList.toggle('active',b===item);for(const p of document.querySelectorAll('.panel'))p.hidden=p.id!==tab;$('heading').textContent=headings[tab][0];$('subtitle').textContent=headings[tab][1];if(tab==='traffic')void refreshTraffic()});
 $('reveal').addEventListener('change',()=>{for(const key of secretKeys)$(key).type=$('reveal').checked?'text':'password'});
 $('save').addEventListener('click',()=>run(async()=>{await save();say('設定を保存しました。再起動すると適用されます。')}));
 $('saveRestart').addEventListener('click',()=>run(async()=>{await save();await invoke('agent_action',{action:'restart'});say('設定を保存し、再起動を要求しました。')}));
@@ -27,3 +27,15 @@ let polling=false;
 async function pollUpdate(){if(!updating||polling)return;polling=true;try{const r=await invoke('update_state');$('progress').value=r.percent;$('updateMessage').textContent=r.message;say(r.message,r.failed);if(r.staged){await invoke('close_after_update');return}if(!r.running){updating=false;controls()}}catch(e){say(e,true)}finally{polling=false}}
 async function init(){controls();try{const data=await invoke('load_settings');$('version').textContent='設定 v'+data.version;$('vaultState').textContent=data.credentials_configured?'保存済み':'未設定';for(const key of fields){if(checks.has(key))$(key).checked=!!data.form[key];else $(key).value=data.form[key]??''}ready=true;dirty(false);say('準備完了');controls();void status()}catch(e){say(e,true)}}
 void init();setInterval(status,15000);setInterval(pollUpdate,750);
+
+const trafficCols=['worker_http','ws_sent','ws_received','turso_requests','turso_receipt_missing','firebird_reads','avg_ms','github_http'];
+const trafficLabels={worker_http:'Worker HTTP試行（WS接続含む）',worker_http_response:'Worker HTTP応答',ws_attempt:'WebSocket送信試行',ws_sent:'WebSocket送信',ws_received:'WebSocket受信',ws_connected:'WebSocket接続成功',ws_handshake:'WebSocket接続試行',turso_requests:'Turso HTTP試行（確認済み）',turso_responses:'Turso HTTP応答',turso_http_ok:'Turso HTTP成功',turso_pipeline_ok:'Tursoパイプライン成功',turso_receipt_missing:'Turso通信数不明（操作数）',firebird_reads:'Firebird読取処理',avg_ms:'Firebird平均応答 ms',github_http:'GitHub HTTP試行',http_error:'HTTPエラー',ws_error:'WSエラー',firebird_error:'Firebirdエラー'};
+const opNames={lease:'稼働権限',presence:'端末状態',sync:'生産データ',schedule:'生産予定',cache:'待機キャッシュ',aliases:'別名',status_colors:'状態色',socket:'WS接続',production:'生産読取',materials:'原料読取',health:'接続確認',update_check:'更新確認',update_download:'更新取得'};
+let trafficData=null,trafficBusy=false;
+function stat(c,k){if(k==='avg_ms')return c.firebird_reads?Math.round((c.firebird_ms||0)/c.firebird_reads):0;return c[k]||0}
+function cell(tag,value){const e=document.createElement(tag);e.textContent=String(value);return e}
+function rows(id,items,cols){const el=$(id);el.replaceChildren();for(const [name,c] of items){const tr=document.createElement('tr');tr.append(cell('td',name));for(const k of cols)tr.append(cell('td',k==='errors'?(c.http_error||0)+(c.ws_error||0)+(c.firebird_error||0):stat(c,k)));el.append(tr)}}
+async function refreshTraffic(){if($('traffic').hidden||trafficBusy)return;trafficBusy=true;try{const data=await invoke('traffic_stats',{days:Number($('trafficDays').value)});trafficData=data;const totals=$('trafficTotals');totals.replaceChildren();for(const [k,label] of Object.entries(trafficLabels)){const box=document.createElement('div');box.append(cell('small',label),cell('strong',stat(data.totals,k).toLocaleString('ja-JP')));totals.append(box)}rows('trafficHours',data.hours.slice().reverse().map(x=>[x.hour,x.counts]),trafficCols);rows('trafficOps',Object.entries(data.operations).map(([k,c])=>[opNames[k]||k,c]),['worker_http','ws_sent','ws_received','turso_requests','turso_receipt_missing','errors']);$('trafficStatus').textContent='更新：'+new Date().toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo'})+' JST ・ DO換算の目安：'+Math.ceil((data.totals.ws_received||0)/20)+'（受信したACKを基にした参考値、請求値ではありません）';}catch(e){$('trafficStatus').textContent=String(e)}finally{trafficBusy=false}}
+$('trafficDays').addEventListener('change',()=>void refreshTraffic());
+$('trafficExport').addEventListener('click',async()=>{if(!trafficData)return;try{const csv=['hour,'+trafficCols.join(','),...trafficData.hours.map(x=>[x.hour,...trafficCols.map(k=>stat(x.counts,k))].join(','))].join('\r\n');const path=await invoke('save_traffic_csv',{csv});$('trafficStatus').textContent='CSV保存：'+path;}catch(e){$('trafficStatus').textContent=String(e)}});
+setInterval(refreshTraffic,5000);

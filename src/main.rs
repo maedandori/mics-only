@@ -10,6 +10,7 @@ mod materials;
 mod mirror;
 mod cloud_socket;
 mod polling;
+mod traffic;
 use chrono::{DateTime, Utc};
 use rsfbclient::prelude::*;
 use serde::Deserialize;
@@ -113,9 +114,9 @@ fn presence(c:&Config,coordinator_token:&str,alias_ack:Option<i64>)->Result<Valu
  let payload=json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled,"version":env!("CARGO_PKG_VERSION"),"alias_sync_ack":alias_ack,
    "update_failed_version":env::current_exe().ok().and_then(|p|p.parent().map(|dir|dir.join("data").join("update-blocked-version.txt"))).and_then(|p|fs::read_to_string(p).ok()).map(|v|v.trim().trim_start_matches('v').to_owned())});
  if let Some(result)=cloud_socket::call("presence",&payload,None){return result}
- let result=client().post(&format!("{}/presence",c.coordinator_url.trim_end_matches('/')))
+ let result=traffic::http("presence",true,||client().post(&format!("{}/presence",c.coordinator_url.trim_end_matches('/')))
   .set("Authorization",&format!("Bearer {coordinator_token}"))
-  .send_json(payload)
+  .send_json(payload))
   .map_err(|e|match e {
       ureq::Error::Status(status, response) => {
           let detail=response.into_string().unwrap_or_default();
@@ -149,9 +150,9 @@ fn acquire(c: &Config, coordinator_token: &str) -> Result<Option<Lease>, String>
             Some(result)=>serde_json::from_value(result?).map_err(|_|"Invalid socket lease response".to_string())?,
             None=>{
                 // The old HTTP server accepts only TTL=45; keep mixed versions safe.
-                let response=client().post(&format!("{}/lease",c.coordinator_url.trim_end_matches('/')))
+                let response=traffic::http("lease",true,||client().post(&format!("{}/lease",c.coordinator_url.trim_end_matches('/')))
                     .set("Authorization",&format!("Bearer {coordinator_token}"))
-                    .send_json(json!({"agent_id":c.agent_id,"role":"backup","ttl_seconds":45}))
+                    .send_json(json!({"agent_id":c.agent_id,"role":"backup","ttl_seconds":45})))
                     .map_err(|e|format!("LEASE_REQUEST_FAILED {e}"))?;
                 response.into_json().map_err(|_|"Invalid HTTP lease response".to_string())?
             }
@@ -377,12 +378,12 @@ fn upload(c: &Config, sync_token: &str, lease: &Lease, snapshot: Value) -> Resul
     if let Some(result)=cloud_socket::call("sync",&snapshot,Some(lease)){
         return if result?["ok"]==true{Ok(())}else{Err("Socket sync not acknowledged".into())}
     }
-    let response = client().post(&format!("{}/sync", c.coordinator_url.trim_end_matches('/')))
+    let response = traffic::http("sync",true,||client().post(&format!("{}/sync", c.coordinator_url.trim_end_matches('/')))
         .set("Authorization", &format!("Bearer {sync_token}"))
         .set("X-Mics-Agent-Id", &c.agent_id)
         .set("X-Mics-Lease-Token", &lease.lease_token)
         .set("X-Mics-Lease-Epoch", &lease.epoch.to_string())
-        .send_json(snapshot).map_err(|e| format!("SYNC_FAILED {e}"))?;
+        .send_json(snapshot)).map_err(|e| format!("SYNC_FAILED {e}"))?;
     let body: Value = response.into_json().map_err(|e| format!("Bad sync JSON: {e}"))?;
     if body["ok"] != true {return Err("Sync not acknowledged by coordinator".into())}
     Ok(())
@@ -577,6 +578,7 @@ fn run(c: Config) -> Result<(), String> {
                 let elapsed=read_started.elapsed();
                 last_data_poll=Some(std::time::Instant::now());
                 let read_ok=result.as_ref().is_ok_and(|data|data["machines"].as_array().is_some_and(|a|!a.is_empty()));
+                traffic::firebird("production",elapsed,read_ok);
                 if polling.observe(elapsed,read_ok){
                     local.set_poll_interval(polling.production_seconds());
                     println!("FIREBIRD_ADAPTIVE interval={}s elapsed={}ms success={}",polling.production_seconds(),elapsed.as_millis(),read_ok);
@@ -637,6 +639,7 @@ fn run(c: Config) -> Result<(), String> {
                         if grant.epoch==lease.epoch{
                             let started=std::time::Instant::now();
                             let result=schedule::collect(&c,&db_password);
+                            traffic::firebird("schedule",started.elapsed(),result.is_ok());
                             polling.observe_load(started.elapsed(),result.is_ok());
                             match result{
                                 Ok(cache) if grant.valid(&c.agent_id)=>{
@@ -664,6 +667,7 @@ fn run(c: Config) -> Result<(), String> {
                     materials_polled_at=Some(std::time::Instant::now());
                     let started=std::time::Instant::now();
                     let result=materials::sync(&c,&db_password);
+                    traffic::firebird("materials",started.elapsed(),result.is_ok());
                     // The daily full material query is not representative of fast production reads.
                     // Failures or very slow reads still trigger load protection.
                     if result.is_err()||started.elapsed()>=Duration::from_secs(1){polling.observe_load(started.elapsed(),result.is_ok());}
@@ -722,7 +726,7 @@ fn test_connection(c:&Config)->Result<(),String>{
         return Err("Coordinator URL missing: cannot register this PC in D1".into())
     }
     let health=format!("{}/health",c.coordinator_url.trim_end_matches('/'));
-    let response=client().get(&health).call().map_err(|e|format!("COORDINATOR_HTTP_FAILED {e}"))?;
+    let response=traffic::http("health",true,||client().get(&health).call()).map_err(|e|format!("COORDINATOR_HTTP_FAILED {e}"))?;
     let result:Value=response.into_json().map_err(|e|format!("COORDINATOR_BAD_RESPONSE {e}"))?;
     if result["service"]!="mics-failover"||result["ok"]!=true{return Err("Coordinator health response is invalid".into())}
     println!("COORDINATOR_HTTP_OK; enabled={}",result["enabled"]);

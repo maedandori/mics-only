@@ -151,12 +151,12 @@ pub fn upload_if_changed(c:&super::Config,token:&str,grant:&super::Lease,cache:&
         return Ok(true)
     }
     let endpoint=format!("{}/schedule",c.coordinator_url.trim_end_matches('/'));
-    let response=super::client().post(&endpoint)
+    let response=super::traffic::http("schedule",true,||super::client().post(&endpoint)
         .set("Authorization",&format!("Bearer {token}"))
         .set("X-Mics-Agent-Id",&c.agent_id)
         .set("X-Mics-Lease-Token",&grant.lease_token)
         .set("X-Mics-Lease-Epoch",&grant.epoch.to_string())
-        .send_json(payload).map_err(|e|format!("SCHEDULE_UPLOAD_FAILED {e}"))?;
+        .send_json(payload)).map_err(|e|format!("SCHEDULE_UPLOAD_FAILED {e}"))?;
     let result:Value=response.into_json().map_err(|e|e.to_string())?;
     if result["ok"]!=true{return Err("Schedule sync not acknowledged".into())}
     fs::write(ack,digest).map_err(|e|e.to_string())?;

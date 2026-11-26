@@ -193,8 +193,9 @@ pub fn sync_aliases_now(state:&LocalState)->Result<(),String>{
   let base=url.strip_suffix("/aliases").ok_or("INVALID_CONFIG")?;
   let status_url=format!("{base}/status-colors");
   let get=|endpoint:&str,name:&str|->Result<Vec<u8>,String>{
-   let response=ureq::AgentBuilder::new().timeout(Duration::from_secs(8)).build()
-    .get(endpoint).set("Authorization",&format!("Bearer {token}")).call()
+   let op=if name=="change-aliases.json"{"aliases"}else{"status_colors"};
+   let response=super::traffic::http(op,true,||ureq::AgentBuilder::new().timeout(Duration::from_secs(8)).build()
+    .get(endpoint).set("Authorization",&format!("Bearer {token}")).call())
     .map_err(|e|match e{
       ureq::Error::Status(401|403,_)=>"AUTH_FAILED".to_string(),
       ureq::Error::Status(code,_)=>format!("HTTP_{code}"),
