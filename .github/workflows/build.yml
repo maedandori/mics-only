@@ -98,6 +98,9 @@ jobs:
         run: cargo test
       - name: Compile Windows EXEs
         run: cargo build --release
+      - name: Verify Windows launcher recovery and child lifetime
+        shell: pwsh
+        run: ./scripts/test-launcher.ps1
       - name: Test and build Japanese Tauri Settings
         shell: pwsh
         run: |

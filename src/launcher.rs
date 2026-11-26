@@ -88,17 +88,25 @@ mod windows {
         let path=root.join("data/core-state.json");
         if path.is_file(){
             let s:State=serde_json::from_slice(&fs::read(path).map_err(err)?).map_err(err)?;
-            if !validate_slot(root,&s.active)||s.previous.as_ref().is_some_and(|p|!validate_slot(root,p)||p.name==s.active.name){return Err("Invalid stored core state".into())}
+            if !validate_slot(root,&s.active){
+                if let Some(previous)=s.previous.filter(|p|validate_slot(root,p)){
+                    let restored=State{active:previous,previous:None};persist(root,&restored)?;return Ok(restored)
+                }
+                return Err("No valid stored Core".into())
+            }
+            if s.previous.as_ref().is_some_and(|p|!validate_slot(root,p)||p.name==s.active.name){
+                let recovered=State{active:s.active,previous:None};persist(root,&recovered)?;return Ok(recovered)
+            }
             return Ok(s)
         }
         let slot=slot_path(root,"a")?;
         let s=State{active:Slot{name:"a".into(),version:binary_version(&slot)?},previous:None};
         persist(root,&s)?;Ok(s)
     }
-    fn launch(root:&Path,job:&Job,slot:&Slot,trial:Option<&str>)->Result<Child,String>{
+    fn launch(root:&Path,job:&Job,slot:&Slot,trial:Option<(&str,&str)>)->Result<Child,String>{
         let mut cmd=Command::new(slot_path(root,&slot.name)?);
-        cmd.current_dir(root).env("MICS_SUPERVISED","1").env_remove("MICS_TRIAL_OLD_VERSION").creation_flags(NO_WINDOW);
-        if let Some(old)=trial{cmd.env("MICS_TRIAL_OLD_VERSION",old);}
+        cmd.current_dir(root).env("MICS_SUPERVISED","1").env_remove("MICS_TRIAL_OLD_VERSION").env_remove("MICS_TRIAL_TOKEN").creation_flags(NO_WINDOW);
+        if let Some((old,token))=trial{cmd.env("MICS_TRIAL_OLD_VERSION",old).env("MICS_TRIAL_TOKEN",token);}
         let mut child=cmd.spawn().map_err(err)?;
         if let Err(e)=job.attach(&child){let _=child.kill();let _=child.wait();return Err(e)}
         Ok(child)
@@ -116,13 +124,13 @@ mod windows {
     fn safe_to_switch(child:&Child,slot:&Slot)->bool{
         health().is_some_and(|v|matching(&v,child,slot)&&matches!(v["mode"].as_str(),Some("STANDBY"|"MIRROR_ONLY")))
     }
-    fn wait_trial(root:&Path,child:&mut Child,slot:&Slot)->bool{
+    fn wait_trial(root:&Path,child:&mut Child,slot:&Slot,token:&str)->bool{
         let started=Instant::now();
-        let ack=root.join(format!("data/core-presence-{}",child.id()));
+        let ack=root.join(format!("data/core-presence-{token}"));
         while started.elapsed()<Duration::from_secs(100){
             if !matches!(child.try_wait(),Ok(None)){return false}
-            if health().is_some_and(|v|matching(&v,child,slot))
-                &&fs::read_to_string(&ack).ok().as_deref()==Some(&slot.version)
+            if health().is_some_and(|v|matching(&v,child,slot)&&matches!(v["mode"].as_str(),Some("STANDBY"|"MIRROR_ONLY"|"ACTIVE")))
+                &&fs::read_to_string(&ack).ok().as_deref()==Some(slot.version.as_str())
                 &&started.elapsed()>=Duration::from_secs(5){return true}
             thread::sleep(Duration::from_secs(1));
         }
@@ -208,8 +216,10 @@ mod windows {
         fs::create_dir_all(root.join("data")).map_err(err)?;
         let args:Vec<_>=env::args_os().skip(1).collect();
         if !args.is_empty(){
-            let state=load_state(&root)?;
-            let status=Command::new(slot_path(&root,&state.active.name)?).args(args).current_dir(&root).creation_flags(NO_WINDOW).status().map_err(err)?;
+            let slot=if let Ok(bytes)=fs::read(root.join("data/core-state.json")){
+                let state:State=serde_json::from_slice(&bytes).map_err(err)?;state.active.name
+            }else{"a".into()};
+            let status=Command::new(slot_path(&root,&slot)?).args(args).current_dir(&root).creation_flags(NO_WINDOW).status().map_err(err)?;
             return Ok(status.code().unwrap_or(1))
         }
         // Exclusive Windows file handle is automatically released on exit.
@@ -226,8 +236,18 @@ mod windows {
         let blocked=root.join("data/update-blocked-version.txt");
         let mut downloading:Option<mpsc::Receiver<Result<Option<Staged>,String>>>=None;
         let mut staged:Option<Staged>=None;
+        let mut last_phase=String::new();
+        let mut next_health=Instant::now();
+        let mut last_health=Instant::now();
         loop{
             if let Some(c)=child.as_mut(){
+                if Instant::now()>=next_health{
+                    next_health=Instant::now()+Duration::from_secs(15);
+                    if health().is_some_and(|v|matching(&v,c,&state.active)){last_health=Instant::now();}
+                    if last_health.elapsed()>Duration::from_secs(120)&&start_at.elapsed()>Duration::from_secs(120){
+                        log(&root,"CORE_LOCAL_HEALTH_TIMEOUT");stop(c)?;
+                    }
+                }
                 if !matches!(c.try_wait(),Ok(None)){
                     log(&root,"CORE_EXITED");let _=c.wait();child=None;
                     failures=if start_at.elapsed()>Duration::from_secs(120){1}else{failures.saturating_add(1)};
@@ -250,7 +270,7 @@ mod windows {
                 }
                 if Instant::now()>=next_restart{
                     match launch(&root,&job,&state.active,None){
-                        Ok(c)=>{child=Some(c);start_at=Instant::now();log(&root,"CORE_STARTED");}
+                        Ok(c)=>{child=Some(c);start_at=Instant::now();last_health=start_at;log(&root,"CORE_STARTED");}
                         Err(e)=>{log(&root,&format!("CORE_START_FAILED {e}"));failures=failures.saturating_add(1);next_restart=Instant::now()+Duration::from_secs(30);}
                     }
                 }
@@ -266,7 +286,8 @@ mod windows {
                     Err(mpsc::TryRecvError::Empty)=>{}
                 }
             }
-            let can_switch=child.as_ref().map_or(true,|c|safe_to_switch(c,&state.active));
+            let wants_update=staged.is_some()||(downloading.is_none()&&(request.is_file()||Instant::now()>=next_check));
+            let can_switch=wants_update&&child.as_ref().map_or(true,|c|safe_to_switch(c,&state.active));
             if downloading.is_none()&&staged.is_none()&&(request.is_file()||Instant::now()>=next_check)&&can_switch{
                 let _=fs::remove_file(&request);
                 next_check=Instant::now()+Duration::from_secs(21600);
@@ -285,21 +306,29 @@ mod windows {
                         else{
                             if let Some(c)=child.as_mut(){stop(c)?;}child=None;
                             publish_status(&root,&state,"UPDATING");
-                            let mut trial=launch(&root,&job,&candidate,Some(&state.active.version)).ok();
-                            let healthy=trial.as_mut().is_some_and(|c|wait_trial(&root,c,&candidate));
+                            // The supervisor is still reachable even while Core is being swapped.
+                            let _=fallback_presence(&root,&state);
+                            let token=format!("{}-{}",std::process::id(),chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default());
+                            let mut trial=launch(&root,&job,&candidate,Some((&state.active.version,&token))).ok();
+                            let healthy=trial.as_mut().is_some_and(|c|wait_trial(&root,c,&candidate,&token));
                             if healthy{
-                                let c=trial.as_ref().unwrap();
                                 let promoted=State{active:candidate.clone(),previous:Some(state.active.clone())};
+                                let marker=root.join(format!("data/core-promoted-{token}"));
                                 if persist(&root,&promoted).is_ok(){
                                     state=promoted;
-                                    let _=fs::write(root.join(format!("data/core-promoted-{}",c.id())),"ok");
+                                    if fs::write(&marker,"ok").is_err(){
+                                        // Persisted candidate is healthy; restart without trial mode.
+                                        if let Some(mut c)=trial.take(){stop(&mut c)?;}
+                                        next_restart=Instant::now();
+                                    }else{child=trial.take();}
                                     let _=fs::remove_file(&blocked);
-                                    child=trial.take();failures=0;start_at=Instant::now();
+                                    failures=0;start_at=Instant::now();last_health=start_at;
                                     log(&root,"CORE_UPDATE_SUCCESS");
                                 }
                             }
                             if let Some(mut c)=trial{stop(&mut c)?;}
-                            if child.is_none(){
+                            let _=fs::remove_file(root.join(format!("data/core-presence-{token}")));
+                            if child.is_none()&&state.active.version!=candidate.version{
                                 let _=fs::write(&blocked,&candidate.version);
                                 log(&root,"CORE_UPDATE_FAILED_PREVIOUS_RETAINED");
                                 next_restart=Instant::now();
@@ -310,7 +339,8 @@ mod windows {
                 }
             }
             let phase=if downloading.is_some(){"DOWNLOADING"}else if staged.is_some(){"STAGED"}else if child.is_some(){"RUNNING"}else{"RECOVERING"};
-            publish_status(&root,&state,phase);
+            let status_key=format!("{}:{}:{}",state.active.version,state.active.name,phase);
+            if status_key!=last_phase{publish_status(&root,&state,phase);last_phase=status_key;}
             thread::sleep(Duration::from_secs(2));
         }
     }

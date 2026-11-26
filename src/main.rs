@@ -407,13 +407,14 @@ fn core_data_path(name:&str)->Option<std::path::PathBuf>{
 }
 fn reported_core_version()->String{
     if let Ok(previous)=env::var("MICS_TRIAL_OLD_VERSION"){
-        if !core_data_path(&format!("core-promoted-{}",std::process::id())).is_some_and(|p|p.is_file()){return previous}
+        let promoted=env::var("MICS_TRIAL_TOKEN").ok().and_then(|t|core_data_path(&format!("core-promoted-{t}"))).is_some_and(|p|p.is_file());
+        if !promoted{return previous}
     }
     env!("CARGO_PKG_VERSION").into()
 }
 fn record_core_presence(){
-    if env::var_os("MICS_SUPERVISED").is_none(){return}
-    if let Some(path)=core_data_path(&format!("core-presence-{}",std::process::id())){
+    let Ok(token)=env::var("MICS_TRIAL_TOKEN") else{return};
+    if let Some(path)=core_data_path(&format!("core-presence-{token}")){
         if let Some(parent)=path.parent(){let _=fs::create_dir_all(parent);}
         let _=fs::write(path,env!("CARGO_PKG_VERSION"));
     }
@@ -818,7 +819,15 @@ fn inspect_database(c:&Config, password:&str, sql:Option<&str>) -> Result<String
 fn main() {
     if env::args().any(|arg|arg=="--core-version"){println!("{}",env!("CARGO_PKG_VERSION"));return}
     #[cfg(windows)]
-    if env::args().len()==1 && env::var_os("MICS_SUPERVISED").is_none(){eprintln!("Start mics-only.exe instead");std::process::exit(1)}
+    let _core_lock=if env::args().len()==1 {
+        use std::os::windows::fs::OpenOptionsExt;
+        if env::var_os("MICS_SUPERVISED").is_none(){eprintln!("Start mics-only.exe instead");std::process::exit(1)}
+        let path=core_data_path("core-process.lock").expect("Core data directory");
+        if let Some(parent)=path.parent(){let _=fs::create_dir_all(parent);}
+        match fs::OpenOptions::new().read(true).write(true).create(true).share_mode(0).open(path){
+            Ok(f)=>Some(f),Err(_)=>{eprintln!("Another Core already owns the installation");std::process::exit(1)}
+        }
+    }else{None};
     let result = Config::load().and_then(|c| {
         if env::args().any(|arg|arg=="--sql-query") {
             let file=env::args().skip_while(|x|x!="--sql-query").nth(1).ok_or("SQL file missing")?;
