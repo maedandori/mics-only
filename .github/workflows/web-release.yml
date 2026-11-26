@@ -29,7 +29,8 @@ jobs:
         run: |
           npm install --no-audit --no-fund
           npm run build
-          node --test tests/*.test.mjs
+      - name: Run regression tests from repository root
+        run: node --test local-vue/tests/*.test.mjs
       - name: Package independently versioned UI
         env:
           WEB_VERSION: ${{ inputs.web_version || '1.0.0' }}
