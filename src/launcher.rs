@@ -15,7 +15,7 @@ mod windows {
     const NO_WINDOW:u32=0x08000000;
     const LIMIT:u64=120_000_000;
     const ASSET:&str="MICS-Core-Windows.zip";
-    const LAUNCHER_VERSION:&str="1.0.0";
+    const LAUNCHER_VERSION:&str="1.0.1";
     #[derive(Clone,Debug,Serialize,Deserialize)]
     struct Slot { name:String, version:String }
     #[derive(Clone,Debug,Serialize,Deserialize)]
@@ -63,7 +63,7 @@ mod windows {
         }
     }
     fn publish_status(root:&Path,state:&State,phase:&str){
-        let value=json!({"launcher_version":LAUNCHER_VERSION,"core_version":state.active.version,"core_slot":state.active.name,"previous_core_version":state.previous.as_ref().map(|s|&s.version),"phase":phase});
+        let value=json!({"launcher_version":LAUNCHER_VERSION,"launcher_label":format!("ml{LAUNCHER_VERSION}"),"core_version":state.active.version,"core_slot":state.active.name,"previous_core_version":state.previous.as_ref().map(|s|&s.version),"phase":phase});
         let _=atomic(&root.join("data/launcher-status.json"),value.to_string().as_bytes());
     }
     fn persist(root:&Path,state:&State)->Result<(),String>{
