@@ -438,6 +438,15 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     }
 
     let route=path.split('?').next().unwrap_or("");
+    if route=="/api/web-version"{
+        if method!="GET"&&method!="HEAD"{reply(&mut stream,"405 Method Not Allowed","text/plain",b"GET required","no-store");return}
+        let body=super::web_update::status().to_string();
+        reply(&mut stream,"200 OK","application/json; charset=utf-8",if method=="HEAD"{&[]}else{body.as_bytes()},"no-store");return
+    }
+    if route=="/mics-web-watch.js"{
+        let body=include_bytes!("web-watch.js");
+        reply(&mut stream,"200 OK","application/javascript; charset=utf-8",if method=="HEAD"{&[]}else{body},"no-store");return
+    }
     if route=="/api/json-versions"{
         if method!="GET" && method!="HEAD"{
             reply(&mut stream,"405 Method Not Allowed","text/plain",b"GET or HEAD required","no-store");return
@@ -601,19 +610,28 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
     // Versioned Vue bundle. The v0.2.5 updater preserves existing www files:
     // a new versioned directory is copied without replacing the legacy UI.
     let route=path.split('?').next().unwrap_or("");
-    let vue_dir=www_dir().join(concat!("vue-v",env!("CARGO_PKG_VERSION")));
+    let www=www_dir();
+    let base_prefix=concat!("vue-v",env!("CARGO_PKG_VERSION"));
+    let base_dir=www.join(base_prefix);
+    let active=super::web_update::active_dir(&www);
+    let explicit_prefix=route.trim_start_matches('/').split('/').next().unwrap_or("");
+    let explicit_web=super::web_update::explicit_dir(&www,explicit_prefix);
+    let (prefix,vue_dir)=if let Some(dir)=explicit_web{(explicit_prefix.to_owned(),dir)}
+        else if explicit_prefix==base_prefix{(base_prefix.to_owned(),base_dir.clone())}
+        else{active.unwrap_or((base_prefix.to_owned(),base_dir))};
     let vue_entry=vue_dir.join("index.html");
+    let asset_prefix=format!("/{prefix}/");
     // Original uploaded template is the default; manual legacy=1 remains available.
     let legacy_opt_in=path.split("?").nth(1).is_some_and(|q|q.split("&").any(|v|v=="legacy=1"));
-    let explicit_vue_asset=route.starts_with(concat!("/vue-v",env!("CARGO_PKG_VERSION"),"/"));
+    let explicit_vue_asset=route.starts_with(&asset_prefix);
 
-    if (!legacy_opt_in || explicit_vue_asset) && vue_bundle_ready(&vue_dir) {
+    if (!legacy_opt_in || explicit_vue_asset) && (prefix.starts_with("web-v") || vue_bundle_ready(&vue_dir)) {
         let requested=if matches!(route,"/"|"/index.html"){
             Some(vue_entry.clone())
         }else if matches!(route,"/change-schedule.html"|"/status-colors.html"|"/change-aliases.html"){
             Some(vue_dir.join(route.trim_start_matches('/')))
-        }else if route.starts_with(concat!("/vue-v",env!("CARGO_PKG_VERSION"),"/")){
-            let relative=route.trim_start_matches('/').strip_prefix(concat!("vue-v",env!("CARGO_PKG_VERSION"),"/")).unwrap_or("");
+        }else if explicit_vue_asset{
+            let relative=route.strip_prefix(&asset_prefix).unwrap_or("");
             if relative.len()<220 && !relative.is_empty() &&
                 relative.bytes().all(|b|b.is_ascii_alphanumeric()||b"-_./".contains(&b)) &&
                 !relative.contains("..") && !relative.contains("//") &&
@@ -655,6 +673,12 @@ fn serve(mut stream:TcpStream,state:&LocalState) {
             if is_found && matches!(route,"/"|"/index.html") {
                 if let Ok(html)=String::from_utf8(body.clone()) {
                     body=html.replace("</head>","<script src=\"/vue-diagnostics.js\" defer></script></head>").into_bytes();
+                }
+            }
+            if is_found && kind=="text/html; charset=utf-8"{
+                if let Ok(html)=String::from_utf8(body.clone()){
+                    let watch=format!("<script src=\"/mics-web-watch.js?v={prefix}\" defer></script></head>");
+                    body=html.replace("</head>",&watch).into_bytes();
                 }
             }
             reply(&mut stream,if is_found{"200 OK"}else{"404 Not Found"},kind,

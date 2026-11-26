@@ -297,3 +297,7 @@ to distinguish launcher presence from Core readiness and authorize independent
 Core packages. Legacy agents still report their existing fields. Local status and logs: data/launcher-status.json,
 data/launcher.log, launcher-startup.log. Core version state is stored in
 data/core-state.json; do not delete it or manually replace active slots.
+
+## Independent local web (Core 0.2.69+)
+
+Web-only workflow builds JavaScript/CSS/HTML and publishes `web-vX.Y.Z` prereleases with `MICS-Web.zip`; these never replace the latest Core release. Web API contract 1, SHA256 and bundle contents are checked before the immutable `www/web-vX.Y.Z` directory becomes active. The previous web stays available, with fallback to the bundled Core web if no independent bundle is available. No Firebird query, lease change, or Core restart. The Core checks the local request file `data/web-update.request` every two seconds; write a version such as `1.0.0` (or `rollback`) to request an update. Authenticated coordinator presence can return `web_update_command: {id,target}`. Local UI observes `/api/web-version` and refreshes after activation. Current generation and last update are available from that endpoint. Test a standby PC before rolling out; static package validation is not a substitute for a real dashboard smoke test.
