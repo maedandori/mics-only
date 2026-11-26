@@ -36,7 +36,9 @@ interval_seconds=30
  # Invalid archive: preflight must not stop a working agent.
  Compress-Archive -Path "$pkg/*" -DestinationPath $zip
  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/apply-update.ps1 -Archive $zip -Target $target -ParentId 0 -Version $next
- if($LASTEXITCODE -eq 0){throw 'Invalid archive unexpectedly accepted'}
+ $preflightExit=$LASTEXITCODE
+ if($preflightExit -ne 1){throw "Invalid archive returned unexpected exit code: $preflightExit"}
+ $global:LASTEXITCODE=0
  $old.Refresh();if($old.HasExited){throw 'Preflight killed old agent'}
  # Make a complete package with an intentionally wrong version: same executable
  # must fail version verification and restore/start the old one.
@@ -48,14 +50,21 @@ interval_seconds=30
  $exeHash=(Get-FileHash (Join-Path $target 'mics-only.exe')).Hash
  Compress-Archive -Path "$pkg/*" -DestinationPath $zip -Force
  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/apply-update.ps1 -Archive $zip -Target $target -ParentId 0 -Version $next
- if($LASTEXITCODE -eq 0){throw 'Wrong version unexpectedly accepted'}
+ $failedUpdateExit=$LASTEXITCODE
+ if($failedUpdateExit -ne 1){throw "Wrong version returned unexpected exit code: $failedUpdateExit"}
+ $global:LASTEXITCODE=0
  $log=Get-Content (Join-Path $target 'data/update.log') -Raw
- if($log -notmatch 'UPDATE_RECOVERY_RESTARTED'){throw "Recovery did not complete: $log"}
+ if($log -notmatch 'UPDATE_FAILED Agent health/version or Worker ACK check failed'){throw "Expected failed-version health check was not exercised: $log"}
+ if($log -notmatch 'UPDATE_RECOVERY_RESTARTED' -or $log -match 'UPDATE_RECOVERY_FAILED'){throw "Recovery did not complete: $log"}
  $after=Invoke-RestMethod 'http://127.0.0.1:8787/api/status' -TimeoutSec 3
  if($after.version -ne $healthy.version){throw 'Recovered version mismatch'}
  if((Get-FileHash (Join-Path $target 'mics.ini')).Hash -ne $iniHash -or (Get-FileHash (Join-Path $target 'mics-only.exe')).Hash -ne $exeHash){throw 'Recovery modified original files'}
  Write-Host 'Preflight and old-agent recovery verified'
 }finally{
- Get-Process -Name 'mics-only' -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq (Join-Path $target 'mics-only.exe')} | Stop-Process -Force -ErrorAction SilentlyContinue
+ $owned=@(Get-Process -Name 'mics-only' -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq (Join-Path $target 'mics-only.exe')})
+ foreach($proc in $owned){Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue;Wait-Process -Id $proc.Id -Timeout 10 -ErrorAction SilentlyContinue}
  Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
+# The negative-case child process intentionally exits 1. Only reach this
+# success exit after all assertions and cleanup; real failures still throw.
+exit 0
