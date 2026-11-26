@@ -89,10 +89,13 @@ mod windows {
         if path.is_file(){
             let s:State=serde_json::from_slice(&fs::read(path).map_err(err)?).map_err(err)?;
             if !validate_slot(root,&s.active){
-                if let Some(previous)=s.previous.filter(|p|validate_slot(root,p)){
+                if let Some(previous)=s.previous.clone().filter(|p|validate_slot(root,p)&&p.name!=s.active.name){
                     let restored=State{active:previous,previous:None};persist(root,&restored)?;return Ok(restored)
                 }
-                return Err("No valid stored Core".into())
+                // Keep the supervisor reachable even when both Core files
+                // are missing. It can fetch a replacement from the release.
+                if version(&s.active.version).is_none()||slot_path(root,&s.active.name).is_err(){return Err("Invalid stored slot metadata".into())}
+                return Ok(State{active:s.active,previous:None})
             }
             if s.previous.as_ref().is_some_and(|p|!validate_slot(root,p)||p.name==s.active.name){
                 let recovered=State{active:s.active,previous:None};persist(root,&recovered)?;return Ok(recovered)
@@ -100,12 +103,12 @@ mod windows {
             return Ok(s)
         }
         let slot=slot_path(root,"a")?;
-        let s=State{active:Slot{name:"a".into(),version:binary_version(&slot)?},previous:None};
+        let s=State{active:Slot{name:"a".into(),version:binary_version(&slot).unwrap_or_else(|_|"0.0.0".into())},previous:None};
         persist(root,&s)?;Ok(s)
     }
     fn launch(root:&Path,job:&Job,slot:&Slot,trial:Option<(&str,&str)>)->Result<Child,String>{
         let mut cmd=Command::new(slot_path(root,&slot.name)?);
-        cmd.current_dir(root).env("MICS_SUPERVISED","1").env_remove("MICS_TRIAL_OLD_VERSION").env_remove("MICS_TRIAL_TOKEN").creation_flags(NO_WINDOW);
+        cmd.current_dir(root).env("MICS_SUPERVISED","1").env("MICS_LAUNCHER_VERSION",LAUNCHER_VERSION).env_remove("MICS_TRIAL_OLD_VERSION").env_remove("MICS_TRIAL_TOKEN").creation_flags(NO_WINDOW);
         if let Some((old,token))=trial{cmd.env("MICS_TRIAL_OLD_VERSION",old).env("MICS_TRIAL_TOKEN",token);}
         let mut child=cmd.spawn().map_err(err)?;
         if let Err(e)=job.attach(&child){let _=child.kill();let _=child.wait();return Err(e)}
@@ -136,12 +139,13 @@ mod windows {
         }
         false
     }
-    fn download(root:&Path,installed:&str)->Result<Option<Staged>,String>{
+    fn download(root:&Path,installed:&str,repair:bool)->Result<Option<Staged>,String>{
         let agent=ureq::AgentBuilder::new().timeout(Duration::from_secs(180)).build();
         let r:Value=agent.get("https://api.github.com/repos/maedandori/mics-only/releases/latest").set("User-Agent","mics-only-launcher").call().map_err(err)?.into_json().map_err(err)?;
         let tag=r["tag_name"].as_str().and_then(|v|v.strip_prefix('v')).ok_or("Missing release version")?;
         let latest=version(tag).ok_or("Invalid release version")?;
-        if latest<=version(installed).ok_or("Invalid installed version")?{return Ok(None)}
+        let current=version(installed).ok_or("Invalid installed version")?;
+        if latest<current||(latest==current&&!repair){return Ok(None)}
         if fs::read_to_string(root.join("data/update-blocked-version.txt")).ok().is_some_and(|s|s.trim().trim_start_matches('v')==tag){return Ok(None)}
         let asset=r["assets"].as_array().and_then(|a|a.iter().find(|v|v["name"]==ASSET)).ok_or("Independent Core asset missing")?;
         let url=asset["browser_download_url"].as_str().ok_or("Missing release URL")?;
@@ -207,7 +211,8 @@ mod windows {
         let Ok(secret)=credentials::load() else{return false};
         if secret.coordinator_token.is_empty(){return false}
         let failed=fs::read_to_string(root.join("data/update-blocked-version.txt")).ok().map(|s|s.trim().trim_start_matches('v').to_owned());
-        let body=json!({"agent_id":id,"display_name":fields.get("display_name").unwrap_or(id),"role":"backup","standby_enabled":false,"version":state.active.version,"update_failed_version":failed,"launcher_version":LAUNCHER_VERSION,"core_state":"offline"});
+        let status=fs::read(root.join("data/launcher-status.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or_default();
+        let body=json!({"agent_id":id,"display_name":fields.get("display_name").unwrap_or(id),"role":"backup","standby_enabled":false,"version":state.active.version,"update_failed_version":failed,"launcher_version":LAUNCHER_VERSION,"core_state":"offline","core_phase":status["phase"],"previous_core_version":state.previous.as_ref().map(|s|&s.version)});
         ureq::AgentBuilder::new().timeout(Duration::from_secs(5)).build().post(&format!("{}/presence",endpoint.trim_end_matches('/'))).set("Authorization",&format!("Bearer {}",secret.coordinator_token)).send_json(body).ok().and_then(|r|r.into_json::<Value>().ok()).is_some_and(|r|r["update_requested"]==true)
     }
     pub fn run()->Result<i32,String>{
@@ -231,7 +236,7 @@ mod windows {
         let mut start_at=Instant::now();
         let mut next_restart=Instant::now();
         let mut next_presence=Instant::now();
-        let mut next_check=Instant::now()+Duration::from_secs(300);
+        let mut next_check=if validate_slot(&root,&state.active){Instant::now()+Duration::from_secs(300)}else{Instant::now()};
         let request=root.join("data/core-update.request");
         let blocked=root.join("data/update-blocked-version.txt");
         let mut downloading:Option<mpsc::Receiver<Result<Option<Staged>,String>>>=None;
@@ -291,8 +296,8 @@ mod windows {
             if downloading.is_none()&&staged.is_none()&&(request.is_file()||Instant::now()>=next_check)&&can_switch{
                 let _=fs::remove_file(&request);
                 next_check=Instant::now()+Duration::from_secs(21600);
-                let dir=root.clone();let installed=state.active.version.clone();let (tx,rx)=mpsc::channel();
-                thread::spawn(move||{let _=tx.send(download(&dir,&installed));});
+                let dir=root.clone();let installed=state.active.version.clone();let repair=child.is_none();let (tx,rx)=mpsc::channel();
+                thread::spawn(move||{let _=tx.send(download(&dir,&installed,repair));});
                 downloading=Some(rx);
             }
             if staged.is_some()&&can_switch{
@@ -328,7 +333,7 @@ mod windows {
                             }
                             if let Some(mut c)=trial{stop(&mut c)?;}
                             let _=fs::remove_file(root.join(format!("data/core-presence-{token}")));
-                            if child.is_none()&&state.active.version!=candidate.version{
+                            if child.is_none()&&state.active.name!=candidate.name{
                                 let _=fs::write(&blocked,&candidate.version);
                                 log(&root,"CORE_UPDATE_FAILED_PREVIOUS_RETAINED");
                                 next_restart=Instant::now();

@@ -109,8 +109,15 @@ fn presence(c:&Config,coordinator_token:&str,alias_ack:Option<i64>)->Result<Valu
  if coordinator_token.is_empty()||c.coordinator_url.is_empty(){return Err("Presence credentials missing".into())}
  let url=url::Url::parse(&c.coordinator_url).map_err(|e|e.to_string())?;
  if url.scheme()!="https"||url.host_str().is_none(){return Err("Invalid coordinator URL".into())}
- let payload=json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled,"version":reported_core_version(),"alias_sync_ack":alias_ack,
+ let mut payload=json!({"agent_id":c.agent_id,"display_name":if c.display_name.is_empty(){&c.agent_id}else{&c.display_name},"role":"backup","standby_enabled":c.enabled,"version":reported_core_version(),"alias_sync_ack":alias_ack,
    "update_failed_version":env::current_exe().ok().and_then(|p|p.parent().map(|dir|dir.join("data").join("update-blocked-version.txt"))).and_then(|p|fs::read_to_string(p).ok()).map(|v|v.trim().trim_start_matches('v').to_owned())});
+ if let Ok(launcher)=env::var("MICS_LAUNCHER_VERSION"){
+    let status=core_data_path("launcher-status.json").and_then(|p|fs::read(p).ok()).and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or_default();
+    payload["launcher_version"]=json!(launcher);
+    payload["core_state"]=json!(if core_trial_pending(){"trial"}else{"running"});
+    payload["core_phase"]=if core_trial_pending(){json!("UPDATING")}else{status["phase"].clone()};
+    payload["previous_core_version"]=status["previous_core_version"].clone();
+ }
  if let Some(result)=cloud_socket::call("presence",&payload,None){
    if result.is_ok(){record_core_presence();}
    return result
@@ -405,11 +412,11 @@ fn remote_alias_sync_request(response:&Value,local:&local_web::LocalState){
 fn core_data_path(name:&str)->Option<std::path::PathBuf>{
     env::current_exe().ok().and_then(|p|p.parent().map(|d|d.join("data").join(name)))
 }
+fn core_trial_pending()->bool{
+    env::var_os("MICS_TRIAL_OLD_VERSION").is_some()&&!env::var("MICS_TRIAL_TOKEN").ok().and_then(|t|core_data_path(&format!("core-promoted-{t}"))).is_some_and(|p|p.is_file())
+}
 fn reported_core_version()->String{
-    if let Ok(previous)=env::var("MICS_TRIAL_OLD_VERSION"){
-        let promoted=env::var("MICS_TRIAL_TOKEN").ok().and_then(|t|core_data_path(&format!("core-promoted-{t}"))).is_some_and(|p|p.is_file());
-        if !promoted{return previous}
-    }
+    if core_trial_pending(){if let Ok(previous)=env::var("MICS_TRIAL_OLD_VERSION"){return previous}}
     env!("CARGO_PKG_VERSION").into()
 }
 fn record_core_presence(){

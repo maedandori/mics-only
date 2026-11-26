@@ -289,7 +289,8 @@ a cloud presence ACK before being promoted. A failing candidate leaves the
 previous active Core intact; a failed version is blocked automatically.
 The launcher does not acquire a Firebird lease. The old Core reports its own
 presence while running; the launcher sends a compatibility HTTP presence only
-when no Core is alive. The current Admin schema does not yet distinguish launcher
-presence from Core readiness. Local status and logs: data/launcher-status.json,
+when no Core is alive. Machine-control must be upgraded to the companion Launcher/Core Admin protocol
+to distinguish launcher presence from Core readiness and authorize independent
+Core packages. Legacy agents still report their existing fields. Local status and logs: data/launcher-status.json,
 data/launcher.log, launcher-startup.log. Core version state is stored in
 data/core-state.json; do not delete it or manually replace active slots.
