@@ -1,6 +1,6 @@
 {
   "productName": "MICS-only 設定",
-  "version": "0.2.67",
+  "version": "0.2.68",
   "identifier": "jp.maedandori.mics-only.settings",
   "build": {
     "frontendDist": "ui"

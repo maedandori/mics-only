@@ -231,7 +231,12 @@ fn read(c: &Config, password: &str) -> Result<Value, String> {
          COALESCE(TRIM(CAST(W.STAFFNAME AS VARCHAR(100))), ''),
          COALESCE(TRIM(CAST(W.QTYPLAN AS VARCHAR(24))), ''),
          COALESCE(TRIM(CAST(W.REALCYCLETIME AS VARCHAR(24))), ''),
-         {mend}, {pick}
+         {mend}, ({pick} || '|' || COALESCE(TRIM(CAST(
+           COALESCE((SELECT FIRST 1 O.CYCLETIME FROM MORDER O
+             WHERE O.MORDERNO=W.MORDERNO AND COALESCE(O.DELETEFLG,0)=0
+               AND O.CYCLETIME>0 ORDER BY O.ENTRYNO DESC),
+             CASE WHEN T.CYCLETIME>0 THEN T.CYCLETIME ELSE NULL END)
+           AS VARCHAR(24))), ''))
          FROM MACHINEWORK W
          LEFT JOIN SCHEDULE S ON S.MORDERNO=W.MORDERNO AND S.MACHINENO=W.MACHINENO AND COALESCE(S.DELETEFLG,0)=0
          LEFT JOIN TOOL T ON T.ENTRYNO=S.TOOLENTRYNO
@@ -262,10 +267,13 @@ fn read(c: &Config, password: &str) -> Result<Value, String> {
                 existing["status_code"] = json!("AMBIGUOUS");
                 existing["mold_name"] = json!("");
                 existing["staff_name"] = json!("");
+                existing["target_cycle_seconds"] = Value::Null;
             }
             continue;
         }
         let p = qty(&plan); let ok = qty(&good);
+        // Keep the existing 13-column Firebird tuple; both fields are numeric strings.
+        let (pick, target) = pick.split_once('|').unwrap_or((&pick, ""));
         result.insert(no, json!({
             "machine_no": no, "order_no":order, "status_code":status,
             "product_name":product, "mold_no":tool_no, "mold_name":mold,
@@ -274,6 +282,7 @@ fn read(c: &Config, password: &str) -> Result<Value, String> {
              "qty_ng_shift_status":if today_by_machine.contains_key(&no){"mics_today"}else{"unavailable"},
             "qty_remaining":(p-ok).max(0),
             "cycle_seconds":cycle.parse::<f64>().ok(),
+            "target_cycle_seconds":target.trim().parse::<f64>().ok().filter(|n| n.is_finite() && *n > 0.0),
             "pick_qty":pick.trim().parse::<f64>().ok().filter(|n| n.is_finite() && *n > 0.0),
             "staff_name":staff.trim(),
             "scheduled_end_at":if scheduled_end.trim().is_empty(){None}else{Some(scheduled_end.trim())}
@@ -365,6 +374,7 @@ fn critical_machine_fingerprint(m: &Value) -> String {
         m["staff_name"],
         m["qty_plan"],
         m["pick_qty"],
+        m["target_cycle_seconds"],
         m["scheduled_end_at"],
         has_cycle,
     ])).unwrap_or_default()
