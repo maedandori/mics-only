@@ -26,7 +26,7 @@ $vueCreated=$false
 $createdCore=$false
 $createdState=$false
 function Log([string]$message){
- Add-Content -LiteralPath $log -Value ("$(Get-Date -Format o) "+$message)
+ try{Add-Content -LiteralPath $log -Value ("$(Get-Date -Format o) "+$message)}catch{Write-Warning "Cannot write update.log: $_"}
 }
 function Own([string]$name){
  $path=Join-Path $Target ($name+'.exe')
@@ -160,7 +160,7 @@ try{
  foreach($n in $web){Copy-Item -LiteralPath (Join-Path (Join-Path $stage 'www') $n) -Destination (Join-Path (Join-Path $Target 'www') $n) -Force}
  Log 'UPDATE_STAGE 75 Starting new agent'
  $process=Start-Process -FilePath (Join-Path $Target 'mics-only.exe') -WorkingDirectory $Target -PassThru
- WaitHealth $process $Version.TrimStart('v') ([bool]$Migration)
+ WaitHealth $process ($Version.TrimStart('v')) ([bool]$Migration)
  Remove-Item -LiteralPath (Join-Path $data 'update-blocked-version.txt') -Force -ErrorAction SilentlyContinue
  Log "UPDATE_SUCCESS $Version"
 }catch{
@@ -170,7 +170,7 @@ try{
   Log "UPDATE_FAILED $why"
   if($stopping -and $backupReady){
    try{
-    Set-Content -LiteralPath (Join-Path $data 'update-blocked-version.txt') -Value $Version
+    try{Set-Content -LiteralPath (Join-Path $data 'update-blocked-version.txt') -Value $Version}catch{Log 'Could not persist blocked version'}
     RestorePrevious
    }catch{Log "UPDATE_RECOVERY_FAILED $($_.Exception.Message)"}
   }elseif($vueCreated -and $vueDest){Remove-Item -LiteralPath $vueDest -Recurse -Force -ErrorAction SilentlyContinue}
