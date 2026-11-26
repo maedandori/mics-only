@@ -268,3 +268,28 @@ Local machine nodes now show 次の変更 (型替え / 色替え / 品番替え)
 ## v0.2.40 — Local web refresh without manual reload
 
 The local Windows agent keeps its loopback `GET /api/live` SSE stream, and additionally exposes a metadata-only `GET /api/json-versions` endpoint for `machines.json`, `schedule-local.json`, and local alias/status-color JSON files. The local dashboard and change-schedule page check these cheap version markers every 8 seconds while the page is open; if a file changed they reload the relevant JSON from the **same PC**, not D1/Turso/Firebird. Browser SSE remains the fastest path and is reconnected automatically. When SSE messages are missed or the socket reports connected but stalls, the version watchdog repairs the UI automatically. A busy dashboard queues missed refreshes. On older agents without the metadata endpoint, a 15–20-second local-only refresh fallback remains active. Versioned assets require one hard page reload when upgrading. The Windows release smoke test opens a real SSE stream, edits `data/machines.json`, and verifies the change event is delivered.
+
+## Launcher/Core migration (0.2.66)
+**Initial installation requires manual migration.** Do not use the legacy Admin
+update command to install this architecture. The old updater only copies two
+executables. Stop the old agent/settings on the target Windows PC, preserve
+mics.ini, data, and the existing Windows-user DPAPI credentials, back up the
+old executables, then extract MICS-Only-Launcher-Windows.zip into the same
+directory and start mics-only.exe. Do not overwrite an existing Core slot on
+subsequent installs. Test the standby PC first; never migrate all agents at once.
+
+mics-only.exe is the stable supervisor (launcher protocol 1.0.0).
+mics-core-a.exe / mics-core-b.exe are separate executables beside it so all
+existing relative data paths remain unchanged. A Windows Job Object ensures
+Core shutdown when the launcher exits. Independent Core packages are verified
+against the mandatory GitHub asset SHA256, extracted and checked before switching.
+Only STANDBY/MIRROR_ONLY may switch; the old child is stopped before starting
+the candidate. A candidate must return its own local API version/PID and receive
+a cloud presence ACK before being promoted. A failing candidate leaves the
+previous active Core intact; a failed version is blocked automatically.
+The launcher does not acquire a Firebird lease. The old Core reports its own
+presence while running; the launcher sends a compatibility HTTP presence only
+when no Core is alive. The current Admin schema does not yet distinguish launcher
+presence from Core readiness. Local status and logs: data/launcher-status.json,
+data/launcher.log, launcher-startup.log. Core version state is stored in
+data/core-state.json; do not delete it or manually replace active slots.

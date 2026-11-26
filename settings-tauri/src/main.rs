@@ -1,6 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #[path="../../src/credentials.rs"] mod credentials;
-#[path="../../src/updater.rs"] mod updater;
 #[path="../../src/traffic.rs"] mod traffic;
 use serde::{Deserialize,Serialize};
 use serde_json::{json,Value};
@@ -151,16 +150,13 @@ struct Tracker(Arc<Mutex<UpdateState>>);
 fn update_state(tracker:tauri::State<'_,Tracker>)->Result<UpdateState,String>{tracker.0.lock().map(|s|s.clone()).map_err(|_|"更新状況を取得できません。".into())}
 #[tauri::command]
 fn start_update(tracker:tauri::State<'_,Tracker>)->Result<(),String>{
- let exe=env::current_exe().map_err(|_|"実行ファイルの場所を取得できません。")?;let shared=tracker.0.clone();
- {let mut s=shared.lock().map_err(|_|"更新状況を取得できません。")?;if s.running||s.staged{return Err("更新処理中です。".into())}*s=UpdateState{running:true,percent:1,message:"最新版を確認中…".into(),staged:false,failed:false};}
- std::thread::spawn(move||{
-  let result=updater::install_with_progress(&exe,|p,m|{if let Ok(mut s)=shared.lock(){s.percent=p;s.message=m.into()}});
-  if let Ok(mut s)=shared.lock(){s.running=false;match result{
-   Ok(msg) if msg.starts_with("UPDATE_STAGED ")=>{s.staged=true;s.percent=100;s.message="更新の準備が完了しました。適用のため設定画面を閉じます。".into()},
-   Ok(_)=>{s.percent=100;s.message="最新版を使用しています。".into()},
-   Err(_)=>{s.failed=true;s.message="更新に失敗しました。ネットワークと更新ログをご確認ください。".into()}
-  }}
- });Ok(())
+ let dir=root()?;
+ let mut s=tracker.0.lock().map_err(|_|"更新状況を取得できません。")?;
+ if !dir.join("mics-core-a.exe").is_file(){return Err("Launcher/Core の初回導入が必要です。".into())}
+ fs::create_dir_all(dir.join("data")).map_err(|_|"更新要求を保存できません。")?;
+ fs::write(dir.join("data/core-update.request"),"settings").map_err(|_|"更新要求を保存できません。")?;
+ *s=UpdateState{running:false,percent:100,message:"Core 更新を要求しました。待機状態で Launcher が適用します。".into(),staged:false,failed:false};
+ Ok(())
 }
 #[tauri::command]
 fn close_after_update(app:tauri::AppHandle,tracker:tauri::State<'_,Tracker>)->Result<(),String>{
