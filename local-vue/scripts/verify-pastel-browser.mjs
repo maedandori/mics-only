@@ -26,12 +26,15 @@ try{
  await page.evaluate(async article=>{
   const {createApp,reactive}=await import('/js/vanilla-runtime.js');
   const {CycleGauge}=await import('/js/mics-cycle-gauge.js');
-  const m=reactive({machine_no:8,status_code:'210',staff_name:'ゴイ',mold_name:'救急箱本体',product_name:'クリア',mold_no:'H-52',pick_qty:1,cycle_seconds:54.8,target_cycle_seconds:50});
-  window.updateStatus=code=>{m.status_code=code};
+  const machine={machine_no:8,status_code:'210',staff_name:'ゴイ',mold_name:'救急箱本体',product_name:'クリア',mold_no:'H-52',pick_qty:1,cycle_seconds:54.8,target_cycle_seconds:50};
   const metrics={plan:960,ok:180,ng:5,ngRate:0.5,remaining:775,pct:18.75,ngPct:.5,curColor:'クリア',idle:false,change:null};
   createApp({
    components:{CycleGauge,StatusBadge:{props:['code','cfg'],template:'<span>サイクル注意</span>'},DonutChart:{props:['pct','ngPct','ok','plan'],template:'<div class="donut"><div class="donut-in"><b>19%</b></div></div>'}},
-   setup(){const data=reactive(metrics);window.updateMetric=()=>{data.ok=181;data.remaining=774};return {filteredMachines:[m],state:{cfg:{},aliasCfg:{}},metricsByMachine:{8:data},statusStyle:code=>({color:({'210':'#efc43d','200':'#22b77a','410':'#e65b5b'})[String(code)]||'#efc43d'}),machineAnimationEffect:()=>'',productColorStyle:()=>({bg:'#fff',text:'#123',border:'#abc'}),fmtNum:n=>String(n),openMachine:()=>{window.machineClicked=true}}},
+   setup(){
+    // Native reactive() captures the active app at creation time, so instantiate here.
+    const m=reactive(machine);
+    window.updateStatus=code=>{m.status_code=code};
+    const data=reactive(metrics);window.updateMetric=()=>{data.ok=181;data.remaining=774};return {filteredMachines:[m],state:{cfg:{},aliasCfg:{}},metricsByMachine:{8:data},statusStyle:code=>({color:({'210':'#efc43d','200':'#22b77a','410':'#e65b5b'})[String(code)]||'#efc43d'}),machineAnimationEffect:()=>'',productColorStyle:()=>({bg:'#fff',text:'#123',border:'#abc'}),fmtNum:n=>String(n),openMachine:()=>{window.machineClicked=true}}},
    template:article
   }).mount('#app');
  },article);
@@ -59,7 +62,7 @@ try{
  await assertOutline('#efc43d');
  for(const [code,accent] of [['200','#22b77a'],['410','#e65b5b'],['210','#efc43d']]){
   await page.evaluate(code=>window.updateStatus(code),code);
-  await page.waitForFunction(code=>document.querySelector('article[data-machine="8"]')?.dataset.status===code,code);
+  await page.waitForFunction(code=>document.querySelector('article[data-machine="8"]')?.dataset.status===code,code,{timeout:5000});
   await assertOutline(accent);
  }
  const stats=card.locator('.mics-pastel-stats');
