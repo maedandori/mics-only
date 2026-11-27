@@ -2,13 +2,25 @@ name: Build and release MICS Only portable
 # One final build on the release commit. Concurrency prevents overlapping
 # Windows builds; superseded runs are cancelled.
 on:
+  # Web-only changes have their own Chromium and packaging workflow.
+  # package.json remains shared with the Core version contract.
   push:
     branches: [main]
-    paths-ignore:
-      - 'local-vue/**'
-      - '.github/workflows/web-release.yml'
+    paths:
+      - '**'
+      - '!local-vue/**'
+      - 'local-vue/package.json'
+      - '!.github/workflows/web-release.yml'
+      - '!.github/workflows/build.yml'
+      - '!AGENTS.md'
   pull_request:
     branches: [main]
+    paths:
+      - '**'
+      - '!local-vue/**'
+      - 'local-vue/package.json'
+      - '!.github/workflows/web-release.yml'
+      - '!AGENTS.md'
   workflow_dispatch:
 concurrency:
   group: mics-only-windows-${{ github.ref }}

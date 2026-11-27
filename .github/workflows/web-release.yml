@@ -15,6 +15,7 @@ on:
     paths:
       - 'local-vue/**'
       - '.github/workflows/web-release.yml'
+      - '.github/workflows/build.yml'
 concurrency:
   group: mics-local-web-${{ github.ref }}
   cancel-in-progress: false
