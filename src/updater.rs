@@ -44,7 +44,7 @@ fn release(manual:bool)->Result<Option<(String,String,u64,Option<String>,bool)>,
  let size=asset["size"].as_u64().ok_or("Unknown ZIP size")?;
  if size==0||size>120_000_000{return Err("Unexpected ZIP size".into())}
  let digest=asset["digest"].as_str().and_then(|d|d.strip_prefix("sha256:")).map(str::to_owned);
- if migration&&digest.is_none(){return Err("Launcher migration requires SHA256".into())}
+ if digest.is_none(){return Err("Release SHA256 digest required".into())}
  if let Some(d)=&digest{
   if d.len()!=64||!d.bytes().all(|c|c.is_ascii_hexdigit()){return Err("Invalid digest".into())}
  }
@@ -106,10 +106,9 @@ pub fn install_with_progress(exe:&Path,mut progress:impl FnMut(u32,&str))->Resul
  drop(dst);
  progress(87,"ファイルのサイズと SHA256 を検証中");
  if total!=size{return Err("Release ZIP size mismatch".into())}
- if let Some(expected)=digest{
-  if !format!("{:x}",hasher.finalize()).eq_ignore_ascii_case(&expected){
-   return Err("Release ZIP SHA256 mismatch".into())
-  }
+ let expected=digest.ok_or("Release SHA256 digest required")?;
+ if !format!("{:x}",hasher.finalize()).eq_ignore_ascii_case(&expected){
+  return Err("Release ZIP SHA256 mismatch".into())
  }
  progress(94,"検証完了。更新の適用準備中");
  let script=dir.join("apply-update.ps1");

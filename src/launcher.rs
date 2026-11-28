@@ -165,7 +165,8 @@ mod windows {
         f.sync_all().map_err(err)?;drop(f);
         if total!=size||!format!("{:x}",hash.finalize()).eq_ignore_ascii_case(digest){return Err("Core ZIP size/SHA256 mismatch".into())}
         let output=path.join("extracted");
-        let mut unzip=Command::new("powershell.exe").args(["-NoProfile","-NonInteractive","-Command","$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:MICS_ARCHIVE -DestinationPath $env:MICS_EXTRACT -Force"]).env("MICS_ARCHIVE",&archive).env("MICS_EXTRACT",&output).creation_flags(NO_WINDOW).spawn().map_err(err)?;
+        let ps_unzip="$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; $zip=[IO.Compression.ZipFile]::OpenRead($env:MICS_ARCHIVE); try { if($zip.Entries.Count -gt 5000){throw 'Too many ZIP entries'}; $sum=0L; foreach($e in $zip.Entries){ if($e.FullName -match '(^|[\\\\/])\\.\\.([\\\\/]|$)|^([\\\\/]|[A-Za-z]:)'){throw 'Unsafe ZIP entry'}; $sum+=$e.Length; if($sum -gt 200MB){throw 'ZIP uncompressed size too large'} } } finally { $zip.Dispose() }; Expand-Archive -LiteralPath $env:MICS_ARCHIVE -DestinationPath $env:MICS_EXTRACT -Force";
+        let mut unzip=Command::new("powershell.exe").args(["-NoProfile","-NonInteractive","-Command",ps_unzip]).env("MICS_ARCHIVE",&archive).env("MICS_EXTRACT",&output).creation_flags(NO_WINDOW).spawn().map_err(err)?;
         let start=Instant::now();
         loop{if let Some(status)=unzip.try_wait().map_err(err)?{if !status.success(){return Err("Core extraction failed".into())}break}
             if start.elapsed()>Duration::from_secs(90){let _=unzip.kill();let _=unzip.wait();return Err("Core extraction timed out".into())}thread::sleep(Duration::from_millis(200));}

@@ -9,7 +9,7 @@ $ErrorActionPreference='Stop'
 $Target=[IO.Path]::GetFullPath($Target)
 $data=Join-Path $Target 'data'
 $log=Join-Path $data 'update.log'
-$stage=Join-Path $env:TEMP ('MICS-Only-Stage-'+$PID)
+$stage=Join-Path $data ('update-stage-'+[guid]::NewGuid().ToString('N'))
 $backup=Join-Path $data ('update-backup-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'-'+$PID)
 $names=@('mics-only.exe','mics-only-settings.exe')
 $web=@('index.html','app.js','style.css','sw.js','manifest.webmanifest','icon.svg','vue-diagnostics.js')
@@ -101,8 +101,20 @@ try{
  if(!(Test-Path -LiteralPath $Archive)){throw 'Release ZIP missing'}
  if((Get-Item -LiteralPath $Archive).Length -gt 120MB){throw 'ZIP too large'}
  if((Test-Path -LiteralPath (Join-Path $Target 'mics-core-a.exe')) -or (Test-Path -LiteralPath (Join-Path $Target 'mics-core-b.exe')) -or (Test-Path -LiteralPath (Join-Path $data 'core-state.json'))){throw 'Launcher already installed or migration residue; inspect before updating'}
- New-Item -ItemType Directory -Path $stage -Force | Out-Null
- Log 'UPDATE_STAGE 10 Extracting archive'
+ if(Test-Path -LiteralPath $stage){throw 'Staging directory already exists'}
+ New-Item -ItemType Directory -Path $stage | Out-Null
+ Log 'UPDATE_STAGE 10 Validating and extracting archive'
+ Add-Type -AssemblyName System.IO.Compression.FileSystem
+ $zip=[IO.Compression.ZipFile]::OpenRead($Archive)
+ try{
+  if($zip.Entries.Count -gt 5000){throw 'Too many ZIP entries'}
+  $sum=0L
+  foreach($e in $zip.Entries){
+   if($e.FullName -match '(^|[\\/])\.\.([\\/]|$)|^([\\/]|[A-Za-z]:)'){throw 'Unsafe ZIP entry'}
+   $sum+=$e.Length
+   if($sum -gt 200MB){throw 'ZIP uncompressed size too large'}
+  }
+ }finally{$zip.Dispose()}
  Expand-Archive -LiteralPath $Archive -DestinationPath $stage -Force
  $required=@($names)
  if($Migration){$required+='mics-core-a.exe'}

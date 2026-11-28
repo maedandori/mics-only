@@ -767,14 +767,16 @@ fn test_connection(c:&Config)->Result<(),String>{
 fn sql_read_only(sql: &str) -> Result<String,String> {
     let sql=sql.trim().trim_end_matches(';').trim();
     if sql.is_empty() || sql.contains(';') {return Err("Only one SELECT statement is allowed".into())}
-    let upper=sql.to_ascii_uppercase();
-    if !(upper.starts_with("SELECT ") || upper.starts_with("SELECT\n") || upper.starts_with("WITH ")) {
+    if sql.contains("--") || sql.contains("/*") {return Err("SQL comments are not supported".into())}
+    let normalized: String = sql.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_uppercase();
+    if !(normalized.starts_with("SELECT ") || normalized.starts_with("SELECT(") || normalized.starts_with("WITH ")) {
         return Err("Read-only SELECT/WITH queries only".into())
     }
-    for word in [" INSERT "," UPDATE "," DELETE "," DROP "," ALTER "," CREATE "," EXECUTE "," MERGE "," GRANT "," REVOKE "," INTO "," FOR UPDATE"," UNION "] {
-        if format!(" {upper} ").contains(word) {return Err("Unsafe SQL keyword rejected".into())}
+    let tokens: Vec<&str> = normalized.split(|c: char| !c.is_ascii_alphanumeric() && c != '_').filter(|t| !t.is_empty()).collect();
+    for word in ["INSERT","UPDATE","DELETE","DROP","ALTER","CREATE","EXECUTE","MERGE","GRANT","REVOKE","INTO","UNION"] {
+        if tokens.contains(&word) {return Err("Unsafe SQL keyword rejected".into())}
     }
-    if sql.contains("--") || sql.contains("/*") {return Err("SQL comments are not supported".into())}
+    if tokens.windows(2).any(|w| w == ["FOR","UPDATE"]) {return Err("Unsafe SQL keyword rejected".into())}
     Ok(sql.to_string())
 }
 fn inspect_database(c:&Config, password:&str, sql:Option<&str>) -> Result<String,String> {
